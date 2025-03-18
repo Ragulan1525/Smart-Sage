@@ -46,7 +46,7 @@ pip install -r requirements.txt
 
 ### 4️⃣ Run the Chatbot API
 ```bash
-uvicorn app:app --host 0.0.0.0 --port 8000 --reload
+uvicorn Backend.app:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 ### 5️⃣ Access the API
