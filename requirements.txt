@@ -22,4 +22,8 @@ python-docx
 # OpenAI (If using GPT models for response generation)
 
 
-#uvicorn Backend.app:app --host 0.0.0.0 --port 8000 --reload
+
+
+#Backend : uvicorn Backend.app:app --host 0.0.0.0 --port 8000 --reload
+
+#Frontend : streamlit run smart_sage_chatbot.py

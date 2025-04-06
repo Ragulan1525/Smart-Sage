@@ -23,29 +23,37 @@ def get_chroma_collection():
         logging.error(f"❌ Error getting ChromaDB collection: {e}")
         return None
 
-def store_text_in_chroma(text, filename):
+def store_text_in_chroma_simple(text, filename):
     """Stores extracted text into ChromaDB using chunking for better retrieval."""
     try:
-        # Get the ChromaDB collection
         collection = get_chroma_collection()
         if not collection:
             raise ValueError("❌ ChromaDB collection is not available.")
 
-        # Split text into chunks
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
         chunks = text_splitter.split_text(text)
-        
-        # Generate embeddings for each chunk
+
+        if not chunks:
+            logging.warning(f"❌ No valid text chunks extracted from {filename}.")
+
+        logging.info(f"✅ Splitting resulted in {len(chunks)} chunks.")
+
         embeddings = [model.encode(chunk).tolist() for chunk in chunks]
         
-        # Add chunks to ChromaDB
+        # Debug embeddings
+        if not embeddings or not all(embeddings):
+            logging.error("❌ Embeddings generation failed!")
+            return
+
         collection.add(
             documents=chunks,
             embeddings=embeddings,
             ids=[f"{filename}_{i}" for i in range(len(chunks))],
             metadatas=[{"source": filename} for _ in chunks]
         )
+
         logging.info(f"✅ Stored {len(chunks)} chunks from {filename} into ChromaDB!")
+
     except Exception as e:
         logging.error(f"❌ Error storing text in ChromaDB: {e}")
         raise
@@ -53,4 +61,4 @@ def store_text_in_chroma(text, filename):
 # Example usage (for testing)
 if __name__ == "__main__":
     test_text = "A doubly linked list is a data structure that consists of a sequence of elements, each containing a reference to the next and the previous element."
-    store_text_in_chroma(test_text, "test_file.txt")
+    store_text_in_chroma_simple(test_text, "test_file.txt")
