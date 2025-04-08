@@ -525,8 +525,8 @@ No relevant data was found from ChromaDB, Wikipedia, or Google.
 
 🎯 **Your Task:** Provide the best, most educational response possible.
 """
-
-        llm_response = await chat(model="mistral", messages=[
+#await
+        llm_response =  chat(model="mistral", messages=[
             {"role": "system", "content": "You are an AI tutor. Always generate an answer, even when context is missing."},
             {"role": "user", "content": llm_prompt}
         ])
@@ -563,9 +563,132 @@ COMMON_RESPONSES = {
 }
 
 
+# @app.get("/query")
+# async def get_answer(query: str):
+#     """Handles user queries and retrieves relevant information."""
+#     logging.info(f"Received query: {query}")
+
+#     query = query.lower().strip()
+#     if query in COMMON_RESPONSES:
+#         return {"response": COMMON_RESPONSES[query]}
+
+#     if len(query) < 3:  
+#         return {"response": "Could you provide more details?"}
+
+#     # chroma_result = await retrieve_relevant_text(query, model)
+#     # wiki_result = await async_wikipedia_search(query)
+#     # google_result = await search_google(query)
+#     # web_scrape_result = await scrape_and_summarize(query)
+
+#     # response_parts = []
+#     # if chroma_result:
+#     #     response_parts.append(f"📚 **ChromaDB Result:**\n{chroma_result}")
+#     # if wiki_result:
+#     #     response_parts.append(f"🌍 **Wikipedia:**\n{wiki_result}")
+#     # if google_result:
+#     #     response_parts.append(f"🔎 **Google Results:**\n" + "\n".join(google_result))
+#     # if web_scrape_result:
+#     #     response_parts.append(f"📄 **Extracted Summary:**\n{web_scrape_result}")
+
+#     # if response_parts:
+#     #     return {"response": "\n\n".join(response_parts)}
+
+#     # return {"response": "❌ No relevant data found. Try asking a different educational question. 😊"}
+
+#     response_parts = []
+    
+#     try:
+#         chroma_result = await retrieve_relevant_text(query, model)
+#         if chroma_result:
+#             response_parts.append(f"📚 **ChromaDB Result:**\n{chroma_result}")
+#     except Exception as e:
+#         logging.error(f"❌ Error retrieving ChromaDB result: {e}", exc_info=True)
+
+
+
+#     try:
+#        wiki_result = await async_wikipedia_search(query)
+
+#        if wiki_result:
+#          print(f"📝 Storing Wikipedia Data: {wiki_result}")
+ 
+#         # Ensure context_parts is initialized properly
+#          if 'context_parts' not in locals():
+#             context_parts = []
+
+#          store_text_in_chroma(wiki_result, "Wikipedia", model)
+#          context_parts.append(wiki_result)
+#          response_parts.append(f"🌍 **Wikipedia:**\n{wiki_result}")
+#        else:
+#         print(f"⚠️ No relevant Wikipedia result found for '{query}'")
+#     except Exception as e:
+#        print(f"❌ Error retrieving Wikipedia data: {e}")
+
+
+#     # try:
+#     #    wiki_result = await async_wikipedia_search(query)
+    
+#     #    if wiki_result:
+#     #       print(f"📝 Storing Wikipedia Data: {wiki_result}")  # Debug print
+#     #       store_text_in_chroma(wiki_result, "Wikipedia", model)  
+
+#     #       if not isinstance(context_parts, list):  # Ensure list type
+#     #          context_parts = []  
+        
+#     #       context_parts.append(wiki_result)  # Append Wikipedia result
+#     #       response_parts.append(f"🌍 **Wikipedia:**\n{wiki_result}")
+#     #    else:
+#     #       print(f"⚠️ No relevant Wikipedia result found for '{query}'")
+#     # except Exception as e:
+#     #    print(f"❌ Error retrieving Wikipedia data: {e}")
+
+
+    
+#     try:
+#         google_result = await search_google(query,model)
+#         if google_result:
+#             logging.info(f"🔎 Google Results: {google_result}")
+#             response_parts.append(f"🔎 **Google Results:**\n" + "\n".join(google_result))
+#     except Exception as e:
+#         logging.error(f"Error in retrieving Google results: {e}")
+#         google_result = None
+    
+#     try:
+#         web_scrape_result = await scrape_and_summarize(query)
+#         if web_scrape_result:
+#             response_parts.append(f"📄 **Extracted Summary:**\n{web_scrape_result}")
+#     except Exception as e:
+#         logging.error(f"Error in scraping and summarizing: {e}")
+
+#     if response_parts:
+#         return {"response": "\n\n".join(response_parts)}
+
+#     if not response_parts:
+#        return {"response": "I couldn't find relevant information. Try rephrasing your query!"}
+
+
+#     # 🔹 Step 6: Generate Final Answer Using LLM
+#     try:
+#         combined_context = "\n\n".join(context_parts)
+#         final_prompt = f"Use the following context to answer the question:\n\n{combined_context}\n\nQuestion: {query}\nAnswer:"
+        
+#         final_answer = generate_llm_response.generate(final_prompt)
+
+#         response_parts.append(f"💡 **Final Answer:**\n{final_answer}")
+
+#     except Exception as e:
+#         logging.error(f"❌ Error generating final LLM response: {e}", exc_info=True)
+#         final_answer = "I couldn't generate a response."
+
+#     # 🔹 Step 7: Return the Response
+#     return {"response": "\n\n".join(response_parts)}
+
+
+
+
 @app.get("/query")
 async def get_answer(query: str):
-    """Handles user queries and retrieves relevant information."""
+    """Handles user queries and retrieves relevant information using LLM."""
     logging.info(f"Received query: {query}")
 
     query = query.lower().strip()
@@ -575,114 +698,110 @@ async def get_answer(query: str):
     if len(query) < 3:  
         return {"response": "Could you provide more details?"}
 
-    # chroma_result = await retrieve_relevant_text(query, model)
-    # wiki_result = await async_wikipedia_search(query)
-    # google_result = await search_google(query)
-    # web_scrape_result = await scrape_and_summarize(query)
+    # 🔸 Collect context from all sources
+    context_parts = []
 
-    # response_parts = []
-    # if chroma_result:
-    #     response_parts.append(f"📚 **ChromaDB Result:**\n{chroma_result}")
-    # if wiki_result:
-    #     response_parts.append(f"🌍 **Wikipedia:**\n{wiki_result}")
-    # if google_result:
-    #     response_parts.append(f"🔎 **Google Results:**\n" + "\n".join(google_result))
-    # if web_scrape_result:
-    #     response_parts.append(f"📄 **Extracted Summary:**\n{web_scrape_result}")
-
-    # if response_parts:
-    #     return {"response": "\n\n".join(response_parts)}
-
-    # return {"response": "❌ No relevant data found. Try asking a different educational question. 😊"}
-
-    response_parts = []
-    
+    # 🔹 1. ChromaDB Retrieval
     try:
         chroma_result = await retrieve_relevant_text(query, model)
         if chroma_result:
-            response_parts.append(f"📚 **ChromaDB Result:**\n{chroma_result}")
+            context_parts.append(chroma_result)
     except Exception as e:
         logging.error(f"❌ Error retrieving ChromaDB result: {e}", exc_info=True)
 
-
-
+    # 🔹 2. Wikipedia
     try:
-       wiki_result = await async_wikipedia_search(query)
-
-       if wiki_result:
-         print(f"📝 Storing Wikipedia Data: {wiki_result}")
- 
-        # Ensure context_parts is initialized properly
-         if 'context_parts' not in locals():
-            context_parts = []
-
-         store_text_in_chroma(wiki_result, "Wikipedia", model)
-         context_parts.append(wiki_result)
-         response_parts.append(f"🌍 **Wikipedia:**\n{wiki_result}")
-       else:
-        print(f"⚠️ No relevant Wikipedia result found for '{query}'")
+        wiki_result = await async_wikipedia_search(query)
+        if wiki_result:
+            logging.info(f"📝 Storing Wikipedia Data: {wiki_result}")
+            store_text_in_chroma(wiki_result, "Wikipedia", model)
+            context_parts.append(wiki_result)
+        else:
+            logging.info(f"⚠️ No relevant Wikipedia result found for '{query}'")
     except Exception as e:
-       print(f"❌ Error retrieving Wikipedia data: {e}")
+        logging.error(f"❌ Error retrieving Wikipedia data: {e}")
 
-
-    # try:
-    #    wiki_result = await async_wikipedia_search(query)
-    
-    #    if wiki_result:
-    #       print(f"📝 Storing Wikipedia Data: {wiki_result}")  # Debug print
-    #       store_text_in_chroma(wiki_result, "Wikipedia", model)  
-
-    #       if not isinstance(context_parts, list):  # Ensure list type
-    #          context_parts = []  
-        
-    #       context_parts.append(wiki_result)  # Append Wikipedia result
-    #       response_parts.append(f"🌍 **Wikipedia:**\n{wiki_result}")
-    #    else:
-    #       print(f"⚠️ No relevant Wikipedia result found for '{query}'")
-    # except Exception as e:
-    #    print(f"❌ Error retrieving Wikipedia data: {e}")
-
-
-    
+    # 🔹 3. Google Search
     try:
-        google_result = await search_google(query,model)
+        google_result = await search_google(query, model)
         if google_result:
-            logging.info(f"🔎 Google Results: {google_result}")
-            response_parts.append(f"🔎 **Google Results:**\n" + "\n".join(google_result))
+            context_parts.extend(google_result)
     except Exception as e:
         logging.error(f"Error in retrieving Google results: {e}")
-        google_result = None
-    
+
+    # 🔹 4. Web Scrape & Summarize
     try:
         web_scrape_result = await scrape_and_summarize(query)
         if web_scrape_result:
-            response_parts.append(f"📄 **Extracted Summary:**\n{web_scrape_result}")
+            context_parts.append(web_scrape_result)
     except Exception as e:
         logging.error(f"Error in scraping and summarizing: {e}")
 
-    if response_parts:
-        return {"response": "\n\n".join(response_parts)}
+    # 🔸 Combine all context
+    combined_context = "\n\n".join(context_parts) if context_parts else "No external context available."
 
-    if not response_parts:
-       return {"response": "I couldn't find relevant information. Try rephrasing your query!"}
+    # # 🔹 Final: LLM Generation
+    # try:
+    #     final_prompt =(
+    #         f"Use the following context to answer the question as accurately as possible. "
+    #         f"If the context does not help, answer from your own knowledge.\n\n"
+    #         f"Context:\n{combined_context}\n\n"
+    #         f"Question: {query}\nAnswer:"
+    #     )
 
+    #     final_answer = await generate_llm_response(final_prompt)
 
-    # 🔹 Step 6: Generate Final Answer Using LLM
+    #     return {"response": f"{final_answer}"}
+    
+    # 🔹 Final: LLM Generation
     try:
-        combined_context = "\n\n".join(context_parts)
-        final_prompt = f"Use the following context to answer the question:\n\n{combined_context}\n\nQuestion: {query}\nAnswer:"
-        
-        final_answer = generate_llm_response.generate(final_prompt)
+        final_prompt = f"""
+     You are **Smart Sage**, an AI-powered educational assistant created by Ragulan S. 🎓  
+Your goal is to help students learn, understand, and explore various topics — from programming to AI, general knowledge, and more. You always aim to educate, even if the input isn't directly academic.
 
-        response_parts.append(f"💡 **Final Answer:**\n{final_answer}")
+---
+
+📚 **Instructions:**
+
+1. If **relevant educational context** is available, use it to craft your response.
+2. If the **query is non-educational**, creatively turn it into a **learning opportunity**.
+   - E.g., If asked about a celebrity, explain their influence on society, media, or culture.
+   - If it's a joke or fun fact, explain the underlying concept behind it (e.g., science of humor, psychology).
+3. If it's a **completely unrelated or inappropriate query** (e.g., gossip, dating, etc.), respond **politely**:
+   > "Hey! I'm Smart Sage, your educational companion. I focus on learning and knowledge-building. Could you please ask something study-related? 😊"
+
+4. If the query is **programming-related**, respond with structured code, explanation, and comments.
+5. If it's about **AI/tech**, go deep with clear explanations and examples.
+6. If it's about **general knowledge**, make it concise yet insightful.
+7. Never say “I don’t know.” Do your best to give a meaningful answer.
+8. Use a **friendly, clear, and student-first tone** — like a smart study buddy!
+
+---
+
+
+    📚 **Context**:
+    {combined_context if combined_context else "No relevant data available"}
+
+    🧠 **Question**:
+    {query}
+
+    🎯 **Your Task**: Provide a friendly, helpful, and educational response like a human tutor.
+    """
+
+        llm_response = chat(model="mistral", messages=[
+          {"role": "system", "content": "You are an AI tutor. Always generate an answer, even when context is missing."},
+          {"role": "user", "content": final_prompt}
+        ])
+
+        final_answer = llm_response.get('message', {}).get('content', "").strip() if llm_response else "I couldn't find an answer. Can you rephrase your question?"
+
+        return {"response": final_answer}
 
     except Exception as e:
-        logging.error(f"❌ Error generating final LLM response: {e}", exc_info=True)
-        final_answer = "I couldn't generate a response."
+      logging.error(f"❌ Error generating final LLM response: {e}", exc_info=True)
+      return {"response": "I couldn't generate a response at the moment. Please try again later."}
 
-    # 🔹 Step 7: Return the Response
-    return {"response": "\n\n".join(response_parts)}
-
+    
 
 
 
@@ -749,13 +868,36 @@ def remove_duplicate_ids(chroma_collection):
 
 async def generate_llm_response(query: str, context: str = None) -> str:
     llm_prompt = f"""
-    You are an AI tutor specializing in educational topics.
-    Answer the following question based on the retrieved context.
-    If no relevant data is found, generate an educational response.
+    You are **Smart Sage**, an AI-powered educational assistant created by Ragulan S. 🎓  
+Your goal is to help students learn, understand, and explore various topics — from programming to AI, general knowledge, and more. You always aim to educate, even if the input isn't directly academic.
+
+---
+
+📚 **Instructions:**
+
+If a user asks "Who are you?" or something similar, reply politely:
+  > "I'm Smart Sage, your AI-powered study assistant created by Ragulan S to help you learn and grow! and more relatively "
+
+1. If **relevant educational context** is available, use it to craft your response.
+2. If the **query is non-educational**, creatively turn it into a **learning opportunity**.
+   - E.g., If asked about a celebrity, explain their influence on society, media, or culture.
+   - If it's a joke or fun fact, explain the underlying concept behind it (e.g., science of humor, psychology).
+3. If it's a **completely unrelated or inappropriate query** (e.g., gossip, dating, etc.), respond **politely**:
+   > "Hey! I'm Smart Sage, your educational companion. I focus on learning and knowledge-building. Could you please ask something study-related? 😊"
+
+4. If the query is **programming-related**, respond with structured code, explanation, and comments.
+5. If it's about **AI/tech**, go deep with clear explanations and examples.
+6. If it's about **general knowledge**, make it concise yet insightful.
+7. Never say “I don’t know.” Do your best to give a meaningful answer.
+8. Use a **friendly, clear, and student-first tone** — like a smart study buddy!
+
+---
 
     Question: {query}
     Context: {context if context else 'No relevant data available'}
-    """
+    
+🎓 **Smart Sage's Reply:**
+"""
 
     try:
         response = await asyncio.to_thread(ollama.chat, model="mistral", messages=[
@@ -808,6 +950,28 @@ def get_response(query):
     2️⃣ If the collected data is **insufficient**, rely on your knowledge to provide an **accurate answer**.  
     3️⃣ Ensure responses are **detailed and informative** rather than short one-liners.  
     4️⃣ If the query is **non-educational**, convert it into a learning experience.
+
+        You are **Smart Sage**, an AI-powered educational assistant created by Ragulan S. 🎓  
+Your goal is to help students learn, understand, and explore various topics — from programming to AI, general knowledge, and more. You always aim to educate, even if the input isn't directly academic.
+
+---
+
+📚 **Instructions:**
+
+1. If **relevant educational context** is available, use it to craft your response.
+2. If the **query is non-educational**, creatively turn it into a **learning opportunity**.
+   - E.g., If asked about a celebrity, explain their influence on society, media, or culture.
+   - If it's a joke or fun fact, explain the underlying concept behind it (e.g., science of humor, psychology).
+3. If it's a **completely unrelated or inappropriate query** (e.g., gossip, dating, etc.), respond **politely**:
+   > "Hey! I'm Smart Sage, your educational companion. I focus on learning and knowledge-building. Could you please ask something study-related? 😊"
+
+4. If the query is **programming-related**, respond with structured code, explanation, and comments.
+5. If it's about **AI/tech**, go deep with clear explanations and examples.
+6. If it's about **general knowledge**, make it concise yet insightful.
+7. Never say “I don’t know.” Do your best to give a meaningful answer.
+8. Use a **friendly, clear, and student-first tone** — like a smart study buddy!
+
+---
 
     **Final Answer:**  
     """
