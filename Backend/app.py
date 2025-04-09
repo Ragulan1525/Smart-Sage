@@ -17,7 +17,10 @@ from bs4 import BeautifulSoup
 from sentence_transformers import SentenceTransformer
 from transformers import pipeline
 from apscheduler.schedulers.background import BackgroundScheduler
-
+from Backend.mongodb_utils import save_message, get_chat_history
+from uuid import uuid4
+from fastapi import Query
+from docx import Document
 from chromadb import PersistentClient
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from Backend.retrieval import (
@@ -109,97 +112,14 @@ async def async_scrape_web(query):
     return scrape_educational_websites(query, model) or None
 
 
-# async def search_google(query):
-#     """Fetch live search results from Google, fallback to DuckDuckGo if Google fails."""
-#     try:
-#         async with httpx.AsyncClient() as client:
-#             url = "https://www.googleapis.com/customsearch/v1"
-#             params = {
-#                 "q": query,
-#                 "key": GOOGLE_API_KEY,
-#                 "cx": GOOGLE_SEARCH_ENGINE_ID,
-#                 "num": 3,  # Number of results to fetch
-#             }
-#             retries = 3  # Number of retry attempts
-#             for attempt in range(retries):
-#                 try:
-#                     response = await client.get(url, params=params, timeout=10)
-#                     response.raise_for_status()
-
-#                     if response.status_code == 200:
-#                         break  # ✅ Success, proceed normally
-
-#                 except httpx.RequestError as e:
-#                     logging.warning(f"⚠️ Network error: {e}, Retrying ({attempt + 1}/{retries}) in 5 seconds...")
-#                     await asyncio.sleep(5)
-#                 except httpx.HTTPStatusError as e:
-#                     if e.response.status_code == 429:
-#                         logging.warning(f"⚠️ Google API Rate Limit hit. Retrying ({attempt + 1}/{retries}) in 5 seconds...")
-#                         await asyncio.sleep(5)
-#                     else:
-#                         logging.error(f"❌ Error: {e.response.status_code} - {e.response.text}")
-#                         break
-
-#             data = response.json()
-
-#             if not data.get("items"):
-#                 logging.warning("⚠️ No results from Google, trying DuckDuckGo...")
-#                 return await search_duckduckgo(query)  # Fallback to DuckDuckGo
-
-#             extracted_results = []
-#             for item in data.get("items", []):
-#                 link = item.get("link")
-#                 if link and validators.url(link):
-#                     page_text = await scrape_and_summarize(link)
-#                     extracted_results.append(f"{item['title']}: {page_text}" if page_text else f"{item['title']}: {link}")
-
-#             if extracted_results:
-#                 store_text_in_chroma("\n".join(extracted_results), f"Google Data ({query})", model)
-
-#             return extracted_results
-
-#     except Exception as e:
-#         logging.error(f"❌ Google Search API Error: {e}")
-#         logging.warning("⚠️ Trying DuckDuckGo instead...")
-#         return await search_duckduckgo(query)  # Fallback to DuckDuckGo
-
-    
-# async def search_duckduckgo(query):
-#     """Fetch search results from DuckDuckGo API (No API key required)."""
-#     try:
-#         async with httpx.AsyncClient() as client:
-#             params = {"q": query, "format": "json"}
-#             response = await client.get("https://api.duckduckgo.com/", params=params, timeout=10)
-#             response.raise_for_status()
-#             data = response.json()
-
-#             # Log the raw response to inspect the structure
-#             logging.debug(f"Raw DuckDuckGo response for query '{query}': {data}")
-
-#             if "RelatedTopics" not in data or not data["RelatedTopics"]:
-#                 logging.warning("⚠️ No relevant topics found on DuckDuckGo.")
-#                 return None  # No results to return
-
-#             extracted_results = [
-#                 topic["Text"] for topic in data["RelatedTopics"] if "Text" in topic and topic["Text"]
-#             ]
-
-#             if extracted_results:
-#                 store_text_in_chroma("\n".join(extracted_results), f"DuckDuckGo Data ({query})", model)
-
-#             return extracted_results
-
-#     except Exception as e:
-#         logging.error(f"❌ DuckDuckGo API error: {e}")
-#         return None  # Fallback if DuckDuckGo fails
-
-
-
 import logging
 import asyncio
 import httpx
 import validators
 import random
+
+class RateLimitError(Exception):
+    pass
 
 async def search_google(query, model):
     """Fetch live search results from Google, fallback to DuckDuckGo if Google fails."""
@@ -243,6 +163,11 @@ async def search_google(query, model):
                     break
 
             await asyncio.sleep(5)  # Wait before retrying
+    try:
+       result = await search_google(...)
+    except RateLimitError:
+       logging.warning("⚠️ Google failed. Switching to DuckDuckGo after 1 attempt.")
+       result = await search_duckduckgo(...)
 
     logging.warning("⚠️ Google search failed, switching to DuckDuckGo...")
     return await search_duckduckgo(query, model)  # Fallback if Google fails
@@ -303,25 +228,34 @@ async def process_search_results(data, query, model):
     return await search_duckduckgo(query, model)  # Fallback if Google data isn't useful
 
 
-
-async def fetch_latest_news(query):
+async def fetch_latest_news(query, date=None):
     """Fetch live news using NewsAPI."""
     try:
         async with httpx.AsyncClient() as client:
-            url = f"https://newsapi.org/v2/everything"
+            url = "https://newsapi.org/v2/everything"
             params = {
                 "q": query,
                 "apiKey": NEWS_API_KEY,
                 "language": "en",
                 "pageSize": 5,
+                "sortBy": "relevancy"
             }
+            if date:
+                # Format date as YYYY-MM-DD
+                formatted = date.strftime("%Y-%m-%d")
+                params["from"] = formatted
+                params["to"] = formatted
+
             response = await client.get(url, params=params, timeout=10)
             response.raise_for_status()
             data = response.json()
+
             return [f"{article['title']}: {article['url']}" for article in data.get("articles", [])] if data.get("articles") else None
+
     except Exception as e:
         logging.error(f"❌ News API Error: {e}")
         return None
+
 
 
 
@@ -563,137 +497,81 @@ COMMON_RESPONSES = {
 }
 
 
-# @app.get("/query")
-# async def get_answer(query: str):
-#     """Handles user queries and retrieves relevant information."""
-#     logging.info(f"Received query: {query}")
+import httpx
+import dateparser
+import logging
 
-#     query = query.lower().strip()
-#     if query in COMMON_RESPONSES:
-#         return {"response": COMMON_RESPONSES[query]}
+async def get_on_this_day_events(query):
+    """Fetch historical events for a given date using Wikipedia."""
+    try:
+        # Use dateparser to handle fuzzy dates like "aprl 6 2025"
+        parsed_date = dateparser.parse(query, settings={"PREFER_DATES_FROM": "past"})
+        if not parsed_date:
+            return None
 
-#     if len(query) < 3:  
-#         return {"response": "Could you provide more details?"}
+        month = parsed_date.month
+        day = parsed_date.day
 
-#     # chroma_result = await retrieve_relevant_text(query, model)
-#     # wiki_result = await async_wikipedia_search(query)
-#     # google_result = await search_google(query)
-#     # web_scrape_result = await scrape_and_summarize(query)
+        url = f"https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/{month}/{day}"
 
-#     # response_parts = []
-#     # if chroma_result:
-#     #     response_parts.append(f"📚 **ChromaDB Result:**\n{chroma_result}")
-#     # if wiki_result:
-#     #     response_parts.append(f"🌍 **Wikipedia:**\n{wiki_result}")
-#     # if google_result:
-#     #     response_parts.append(f"🔎 **Google Results:**\n" + "\n".join(google_result))
-#     # if web_scrape_result:
-#     #     response_parts.append(f"📄 **Extracted Summary:**\n{web_scrape_result}")
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, timeout=10)
+            response.raise_for_status()
+            data = response.json()
 
-#     # if response_parts:
-#     #     return {"response": "\n\n".join(response_parts)}
+        events = data.get("events", [])[:5]
+        if not events:
+            return None
 
-#     # return {"response": "❌ No relevant data found. Try asking a different educational question. 😊"}
+        result = f"📅 **Historical Events on April {day}:**\n\n"
+        for event in events:
+            year = event.get("year")
+            text = event.get("text")
+            result += f"🔹 {year}: {text}\n"
 
-#     response_parts = []
-    
-#     try:
-#         chroma_result = await retrieve_relevant_text(query, model)
-#         if chroma_result:
-#             response_parts.append(f"📚 **ChromaDB Result:**\n{chroma_result}")
-#     except Exception as e:
-#         logging.error(f"❌ Error retrieving ChromaDB result: {e}", exc_info=True)
+        return result.strip()
+
+    except Exception as e:
+        logging.error(f"❌ Error fetching on-this-day history: {e}")
+        return None
 
 
+from dateutil import parser as date_parser
+import re
 
-#     try:
-#        wiki_result = await async_wikipedia_search(query)
-
-#        if wiki_result:
-#          print(f"📝 Storing Wikipedia Data: {wiki_result}")
- 
-#         # Ensure context_parts is initialized properly
-#          if 'context_parts' not in locals():
-#             context_parts = []
-
-#          store_text_in_chroma(wiki_result, "Wikipedia", model)
-#          context_parts.append(wiki_result)
-#          response_parts.append(f"🌍 **Wikipedia:**\n{wiki_result}")
-#        else:
-#         print(f"⚠️ No relevant Wikipedia result found for '{query}'")
-#     except Exception as e:
-#        print(f"❌ Error retrieving Wikipedia data: {e}")
+def extract_date_from_query(query: str):
+    try:
+        match = re.search(r'(?:on\s+)?([A-Za-z]+\s+\d{1,2},\s*\d{4})', query)
+        if match:
+            return date_parser.parse(match.group(1), fuzzy=True)
+    except Exception:
+        return None
 
 
-#     # try:
-#     #    wiki_result = await async_wikipedia_search(query)
-    
-#     #    if wiki_result:
-#     #       print(f"📝 Storing Wikipedia Data: {wiki_result}")  # Debug print
-#     #       store_text_in_chroma(wiki_result, "Wikipedia", model)  
 
-#     #       if not isinstance(context_parts, list):  # Ensure list type
-#     #          context_parts = []  
-        
-#     #       context_parts.append(wiki_result)  # Append Wikipedia result
-#     #       response_parts.append(f"🌍 **Wikipedia:**\n{wiki_result}")
-#     #    else:
-#     #       print(f"⚠️ No relevant Wikipedia result found for '{query}'")
-#     # except Exception as e:
-#     #    print(f"❌ Error retrieving Wikipedia data: {e}")
+from dateutil import parser
+from datetime import datetime
 
-
-    
-#     try:
-#         google_result = await search_google(query,model)
-#         if google_result:
-#             logging.info(f"🔎 Google Results: {google_result}")
-#             response_parts.append(f"🔎 **Google Results:**\n" + "\n".join(google_result))
-#     except Exception as e:
-#         logging.error(f"Error in retrieving Google results: {e}")
-#         google_result = None
-    
-#     try:
-#         web_scrape_result = await scrape_and_summarize(query)
-#         if web_scrape_result:
-#             response_parts.append(f"📄 **Extracted Summary:**\n{web_scrape_result}")
-#     except Exception as e:
-#         logging.error(f"Error in scraping and summarizing: {e}")
-
-#     if response_parts:
-#         return {"response": "\n\n".join(response_parts)}
-
-#     if not response_parts:
-#        return {"response": "I couldn't find relevant information. Try rephrasing your query!"}
-
-
-#     # 🔹 Step 6: Generate Final Answer Using LLM
-#     try:
-#         combined_context = "\n\n".join(context_parts)
-#         final_prompt = f"Use the following context to answer the question:\n\n{combined_context}\n\nQuestion: {query}\nAnswer:"
-        
-#         final_answer = generate_llm_response.generate(final_prompt)
-
-#         response_parts.append(f"💡 **Final Answer:**\n{final_answer}")
-
-#     except Exception as e:
-#         logging.error(f"❌ Error generating final LLM response: {e}", exc_info=True)
-#         final_answer = "I couldn't generate a response."
-
-#     # 🔹 Step 7: Return the Response
-#     return {"response": "\n\n".join(response_parts)}
-
-
+def is_future_date(text):
+    try:
+        parsed_date = parser.parse(text, fuzzy=True)
+        return parsed_date > datetime.now()
+    except:
+        return False
 
 
 @app.get("/query")
-async def get_answer(query: str):
+async def get_answer(query: str, chat_id: str = Query(default_factory=lambda: str(uuid4()))):
+
     """Handles user queries and retrieves relevant information using LLM."""
-    logging.info(f"Received query: {query}")
+    logging.info(f"Received query: {query}| Chat ID: {chat_id}")
+
+    # Save the user message
+    save_message(chat_id, "user", query)
 
     query = query.lower().strip()
     if query in COMMON_RESPONSES:
-        return {"response": COMMON_RESPONSES[query]}
+        return {"response": COMMON_RESPONSES[query], "chat_id": chat_id}
 
     if len(query) < 3:  
         return {"response": "Could you provide more details?"}
@@ -737,6 +615,44 @@ async def get_answer(query: str):
     except Exception as e:
         logging.error(f"Error in scraping and summarizing: {e}")
 
+    # 🔹 4.5 Date-based historical news fetch
+    try:
+       extracted_date = extract_date_from_query(query)
+       if extracted_date and extracted_date.date() < datetime.now().date():
+          news_results = await fetch_latest_news("education", date=extracted_date)
+          if news_results:
+            context_parts.append("🗞️ News Highlights:\n" + "\n".join(news_results))
+    except Exception as e:
+        logging.error(f"❌ Error fetching historical news: {e}")
+
+
+      # 🔹 5. News API
+    try:
+        if any(kw in query.lower() for kw in ["what happened", "news", "happened on", "latest events", "headlines"]) and not is_future_date(query):
+            news_result = await fetch_latest_news(query)
+            if news_result:
+                formatted_news = "\n".join(news_result)
+                logging.info("📰 Injecting NewsAPI result into context.")
+                context_parts.append(f"Live News Headlines:\n{formatted_news}")
+        elif is_future_date(query):
+            context_parts.append("The date mentioned is in the future. I can't fetch future news, but I can help you explore historical events or predictions!")
+    except Exception as e:
+        logging.error(f"Error fetching news data: {e}")
+
+    # 🔹 Wikipedia "On this day"
+    try:
+        if "what happened on" in query.lower() or "on this day" in query.lower():
+           history_result = await get_on_this_day_events(query)
+           if history_result:
+              logging.info("📅 Injecting Wikipedia historical events into context.")
+              context_parts.append(history_result)
+    except Exception as e:
+        logging.error(f"❌ Error fetching historical events: {e}")
+
+
+    
+
+
     # 🔸 Combine all context
     combined_context = "\n\n".join(context_parts) if context_parts else "No external context available."
 
@@ -754,30 +670,31 @@ async def get_answer(query: str):
     #     return {"response": f"{final_answer}"}
     
     # 🔹 Final: LLM Generation
-    try:
-        final_prompt = f"""
-     You are **Smart Sage**, an AI-powered educational assistant created by Ragulan S. 🎓  
-Your goal is to help students learn, understand, and explore various topics — from programming to AI, general knowledge, and more. You always aim to educate, even if the input isn't directly academic.
+    
+    final_prompt = f"""
+    You are **Smart Sage**, a Retrieval-Augmented Generation (RAG) AI-powered educational assistant.  
+Your mission is to help students learn, understand, and explore various topics — from programming to AI, general knowledge, and beyond. You always aim to educate, even when the input isn't directly academic.
 
 ---
 
-📚 **Instructions:**
+📚 **Guidelines**:
 
-1. If **relevant educational context** is available, use it to craft your response.
+1. If **relevant educational context** is available, use it to craft a clear and helpful response.
 2. If the **query is non-educational**, creatively turn it into a **learning opportunity**.
-   - E.g., If asked about a celebrity, explain their influence on society, media, or culture.
-   - If it's a joke or fun fact, explain the underlying concept behind it (e.g., science of humor, psychology).
-3. If it's a **completely unrelated or inappropriate query** (e.g., gossip, dating, etc.), respond **politely**:
+   - Example: If asked about a celebrity, explain their cultural or societal impact.
+   - If it's a fun fact or joke, explore the science or psychology behind it.
+3. If it's a **completely unrelated or inappropriate query** (e.g., gossip, dating, etc.), respond politely:
    > "Hey! I'm Smart Sage, your educational companion. I focus on learning and knowledge-building. Could you please ask something study-related? 😊"
 
-4. If the query is **programming-related**, respond with structured code, explanation, and comments.
-5. If it's about **AI/tech**, go deep with clear explanations and examples.
-6. If it's about **general knowledge**, make it concise yet insightful.
-7. Never say “I don’t know.” Do your best to give a meaningful answer.
-8. Use a **friendly, clear, and student-first tone** — like a smart study buddy!
+4. If the query is **programming-related**, respond with structured code, explanations, and comments.
+5. If it's about **AI or technology**, provide deep and insightful information with relevant examples.
+6. If it's a **general knowledge** question, keep the answer concise and meaningful.
+7. Never say “I don’t know.” Always attempt to give a useful answer based on context or your own understanding.
+8. Maintain a **friendly, clear, and student-first tone** — like a smart study buddy!
+9. If the user asks about news, respond with the **latest educational news headlines** or summaries.
+10. If there's a scheduled live session or reminder, **politely mention the date and time** in the reply.
 
 ---
-
 
     📚 **Context**:
     {combined_context if combined_context else "No relevant data available"}
@@ -787,15 +704,31 @@ Your goal is to help students learn, understand, and explore various topics — 
 
     🎯 **Your Task**: Provide a friendly, helpful, and educational response like a human tutor.
     """
+        
+    try:
+        # Build LLM history
+        chat_history = get_chat_history(chat_id)
+        chat_history.append({
+            "role": "system",
+            "content": "You are Smart Sage, an educational assistant using the following context."
+        })
+        chat_history.append({
+            "role": "user",
+            "content": final_prompt
+        })
+
 
         llm_response = chat(model="mistral", messages=[
-          {"role": "system", "content": "You are an AI tutor. Always generate an answer, even when context is missing."},
+          {"role": "system", "content": "You are Smart Sage, a helpful educational AI assistant. Answer accurately using the context provided. If no context is available, use your own knowledge. If asked about recent topics, respond with up-to-date information."},
           {"role": "user", "content": final_prompt}
         ])
 
         final_answer = llm_response.get('message', {}).get('content', "").strip() if llm_response else "I couldn't find an answer. Can you rephrase your question?"
 
-        return {"response": final_answer}
+        # Save assistant reply
+        save_message(chat_id, "assistant", final_answer)
+
+        return {"response": final_answer, "chat_id": chat_id}
 
     except Exception as e:
       logging.error(f"❌ Error generating final LLM response: {e}", exc_info=True)
@@ -817,6 +750,7 @@ chroma_collection = chroma_client.get_or_create_collection(
     }
 )
 
+from fastapi.responses import JSONResponse
 
 
 @app.post("/upload")
@@ -824,11 +758,9 @@ async def upload_file(file: UploadFile = File(...)):
     """Handles file uploads and stores the extracted content in ChromaDB."""
     try:
         # ✅ Ensure chroma_collection is passed
-        response_message = process_uploaded_file(file, model, chroma_collection)  
-        
+        response_message = await process_uploaded_file(file, model, chroma_collection)
         logging.info(f"✅ File '{file.filename}' processed and stored successfully.")
-        return {"message": response_message}
-    
+        return JSONResponse(content={"message": response_message})
     except Exception as e:
         logging.error(f"❌ Error processing file upload: {e}")
         raise HTTPException(status_code=500, detail="An error occurred while processing the file.")
@@ -901,7 +833,7 @@ If a user asks "Who are you?" or something similar, reply politely:
 
     try:
         response = await asyncio.to_thread(ollama.chat, model="mistral", messages=[
-            {"role": "system", "content": "You are an AI tutor. Always generate an answer, even when context is missing."},
+            {"role": "system", "content": "You are Smart Sage, a helpful educational AI assistant. Answer accurately using the context provided. If no context is available, use your own knowledge. If asked about recent topics, respond with up-to-date information."},
             {"role": "user", "content": llm_prompt}
         ])
         
@@ -951,27 +883,8 @@ def get_response(query):
     3️⃣ Ensure responses are **detailed and informative** rather than short one-liners.  
     4️⃣ If the query is **non-educational**, convert it into a learning experience.
 
-        You are **Smart Sage**, an AI-powered educational assistant created by Ragulan S. 🎓  
+        You are **Smart Sage**, an AI-powered educational assistant . 
 Your goal is to help students learn, understand, and explore various topics — from programming to AI, general knowledge, and more. You always aim to educate, even if the input isn't directly academic.
-
----
-
-📚 **Instructions:**
-
-1. If **relevant educational context** is available, use it to craft your response.
-2. If the **query is non-educational**, creatively turn it into a **learning opportunity**.
-   - E.g., If asked about a celebrity, explain their influence on society, media, or culture.
-   - If it's a joke or fun fact, explain the underlying concept behind it (e.g., science of humor, psychology).
-3. If it's a **completely unrelated or inappropriate query** (e.g., gossip, dating, etc.), respond **politely**:
-   > "Hey! I'm Smart Sage, your educational companion. I focus on learning and knowledge-building. Could you please ask something study-related? 😊"
-
-4. If the query is **programming-related**, respond with structured code, explanation, and comments.
-5. If it's about **AI/tech**, go deep with clear explanations and examples.
-6. If it's about **general knowledge**, make it concise yet insightful.
-7. Never say “I don’t know.” Do your best to give a meaningful answer.
-8. Use a **friendly, clear, and student-first tone** — like a smart study buddy!
-
----
 
     **Final Answer:**  
     """
@@ -980,6 +893,27 @@ Your goal is to help students learn, understand, and explore various topics — 
     llm_response = generate_llm_response(final_prompt)
     
     return llm_response
+
+# ---
+
+# 📚 **Instructions:**
+
+# 1. If **relevant educational context** is available, use it to craft your response.
+# 2. If the **query is non-educational**, creatively turn it into a **learning opportunity**.
+#    - E.g., If asked about a celebrity, explain their influence on society, media, or culture.
+#    - If it's a joke or fun fact, explain the underlying concept behind it (e.g., science of humor, psychology).
+# 3. If it's a **completely unrelated or inappropriate query** (e.g., gossip, dating, etc.), respond **politely**:
+#    > "Hey! I'm Smart Sage, your educational companion. I focus on learning and knowledge-building. Could you please ask something study-related? 😊"
+
+# 4. If the query is **programming-related**, respond with structured code, explanation, and comments.
+# 5. If it's about **AI/tech**, go deep with clear explanations and examples.
+# 6. If it's about **general knowledge**, make it concise yet insightful.
+# 7. Never say “I don’t know.” Do your best to give a meaningful answer.
+# 8. Use a **friendly, clear, and student-first tone** — like a smart study buddy!
+
+# ---
+
+
 
 
 

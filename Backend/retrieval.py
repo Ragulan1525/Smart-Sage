@@ -13,6 +13,7 @@ from newspaper import Article
 import PyPDF2
 import docx
 from docx import Document
+import fitz
 import httpx
 import uuid
 import validators
@@ -58,52 +59,6 @@ EDUCATIONAL_SITES = [
 # ✅ Load Summarization Model (One-time)
 summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
 
-
-# async def search_google(query, retries=3):
-#     """Fetches search results from Google with automatic retries and fallback to DuckDuckGo."""
-#     url = "https://www.googleapis.com/customsearch/v1"
-#     params = {"q": query, "key": GOOGLE_API_KEY, "cx": GOOGLE_SEARCH_ENGINE_ID, "num": 5, "hl": "en"}
-
-#     for attempt in range(retries):
-#         try:
-#             async with httpx.AsyncClient() as client:
-#                 response = await client.get(url, params=params, timeout=10)
-#                 response.raise_for_status()
-#                 data = response.json()
-
-#                 if not data.get("items"):
-#                     logging.warning(f"⚠️ No results found for {query}. Trying DuckDuckGo.")
-#                     return await search_duckduckgo(query)  
-
-#                 extracted_results = []
-#                 for item in data["items"]:
-#                     title, snippet, link = item.get("title", "").strip(), item.get("snippet", "").strip(), item.get("link", "").strip()
-
-#                     if not link or not validators.url(link) or any(x in link for x in ["youtube.com", "reddit.com"]):
-#                         continue
-
-#                     page_text = await scrape_and_summarize(link)
-#                     result_entry = f"🔹 **{title}**\n{snippet}\n🔗 {link}"
-#                     if page_text:
-#                         result_entry += f"\n📄 Summary: {page_text}"
-
-#                     extracted_results.append(result_entry)
-
-#                 if extracted_results:
-#                     store_text_in_chroma("\n".join(extracted_results), f"Google Data ({query})", model)
-
-#                 return extracted_results
-
-#         except httpx.HTTPStatusError as e:
-#             if e.response.status_code == 429:
-#                 wait_time = 2 ** attempt
-#                 logging.warning(f"🚨 Google API rate limit hit! Retrying in {wait_time}s...")
-#                 await asyncio.sleep(wait_time)
-#             else:
-#                 logging.error(f"❌ Google API error: {e}")
-#                 return await search_duckduckgo(query)  
-
-#     return None
 
 async def search_google(query, model, retries=3):
     """Fetch search results from Google and fallback to DuckDuckGo on error."""
@@ -173,50 +128,6 @@ async def search_google(query, model, retries=3):
 
     # Fallback if retries failed
     return await search_duckduckgo(query, model)
-
-
-
-# async def search_duckduckgo(query,model):
-#     """Fetches search results from DuckDuckGo if Google fails."""
-#     try:
-#         async with httpx.AsyncClient() as client:
-#             params = {"q": query, "format": "json"}
-#             response = await client.get(DUCKDUCKGO_API_URL, params=params, timeout=10)
-#             response.raise_for_status()
-#             data = response.json()
-
-#             extracted_results = [topic["Text"] for topic in data.get("RelatedTopics", []) if "Text" in topic]
-#             if extracted_results:
-#                 store_text_in_chroma("\n".join(extracted_results), f"DuckDuckGo Data ({query})", model)
-
-#             return extracted_results
-#     except Exception as e:
-#         logging.error(f"❌ DuckDuckGo API error: {e}")
-#         return None
-
-#222222222222
-# async def search_duckduckgo(query, model):
-#     """Fetches search results from DuckDuckGo if Google fails."""
-#     try:
-#         async with httpx.AsyncClient() as client:
-#             params = {"q": query, "format": "json"}
-#             response = await client.get(DUCKDUCKGO_API_URL, params=params, timeout=10)
-#             response.raise_for_status()
-#             data = response.json()
-
-#             if '50x.html' in response.url:
-#                 logging.warning("⚠️ DuckDuckGo API returned a redirect. Possibly malformed input.")
-
-#             extracted_results = [topic["Text"] for topic in data.get("RelatedTopics", []) if "Text" in topic]
-#             if extracted_results:
-#                 await store_text_in_chroma("\n".join(extracted_results), f"DuckDuckGo Data ({query})", model)
-
-#             return extracted_results
-
-#     except Exception as e:
-#         logging.error(f"❌ DuckDuckGo API error: {e}")
-#         return None
-
 
 
 async def search_duckduckgo(query, model):
@@ -383,123 +294,7 @@ async def scrape_educational_websites(query, model):
     return [result[1] for result in results[:3]]
 
 
-# async def async_wikipedia_search(query):
-#     """Fetch Wikipedia summary with proper error handling."""
-#     try:
-#         search_results = wikipedia.search(query)
-#         if not search_results:
-#             return None  # No results found
-
-#         try:
-#             page = wikipedia.page(search_results[0], auto_suggest=False)
-#             summary = wikipedia.summary(page.title, sentences=2)
-#             return summary if len(summary) > 50 else None
-
-#         except wikipedia.exceptions.DisambiguationError as e:
-#             for option in e.options[:3]:  # Try top 3 options
-#                 try:
-#                     summary = wikipedia.summary(option, sentences=2)
-#                     return summary if len(summary) > 50 else None
-#                 except:
-#                     continue
-#             return None
-
-#         except wikipedia.exceptions.PageError:
-#             return None
-
-#     except Exception as e:
-#         logging.error(f"❌ Wikipedia Error: {e}")
-#         return None
-
-# import wikipedia
-
-# async def async_wikipedia_search(query):
-#     """Fetch Wikipedia summary with proper error handling and debugging."""
-#     try:
-#         print(f"🔎 Searching Wikipedia for: {query}")  # Debugging print
-#         search_results = wikipedia.search(query)
-
-#         print(f"📜 Wikipedia Search Results: {search_results}")  # Debugging print
-
-#         if not search_results:
-#             return None  # No results found
-
-#         try:
-#             page = wikipedia.page(search_results[0], auto_suggest=False)
-#             summary = wikipedia.summary(page.title, sentences=3)
-
-#             print(f"✅ Wikipedia Summary Found: {summary}")  # Debugging print
-
-#             return summary if len(summary) > 50 else None  # Avoiding too short summaries
-
-#         except wikipedia.exceptions.DisambiguationError as e:
-#             print(f"⚠️ Disambiguation Error: Multiple results found {e.options[:3]}")  
-            
-#             for option in e.options[:3]:  # Try top 3 options
-#                 try:
-#                     summary = wikipedia.summary(option, sentences=3)
-#                     print(f"📝 Wikipedia Disambiguation Summary: {summary}")  # Debugging print
-#                     return summary if len(summary) > 50 else None
-#                 except:
-#                     continue
-#             return None
-
-#         except wikipedia.exceptions.PageError:
-#             print(f"❌ Wikipedia PageError for {search_results[0]}")
-#             return None
-
-#     except Exception as e:
-#         print(f"❌ Wikipedia API Error: {e}")  # Log full error
-#         return None
-
-
 import wikipedia
-
-# def async_wikipedia_search(query):
-#     """Fetch Wikipedia summary with proper error handling and debugging."""
-#     try:
-#         print(f"🔎 Searching Wikipedia for: {query}")  # Debugging print
-#         search_results = wikipedia.search(query)
-
-#         print(f"📜 Wikipedia Search Results: {search_results}")  # Debugging print
-
-#         if not search_results:
-#             return None  # No results found
-
-#         # Try the top search results
-#         for result in search_results[:3]:  # Checking top 3 results
-#             try:
-#                 page = wikipedia.page(result, auto_suggest=True)
-#                 summary = wikipedia.summary(page.title, sentences=3)
-
-#                 # Ensure the summary is relevant and not too short
-#                 if query.lower() in page.title.lower() and len(summary) > 50:
-#                     print(f"✅ Wikipedia Summary Found: {summary}")
-#                     return summary
-
-#             except wikipedia.exceptions.DisambiguationError as e:
-#                 print(f"⚠️ Disambiguation Error: Trying other options {e.options[:3]}")
-#                 for option in e.options[:3]:  # Try first 3 disambiguation options
-#                     try:
-#                         summary = wikipedia.summary(option, sentences=3)
-#                         if len(summary) > 50:
-#                             print(f"📝 Wikipedia Disambiguation Summary: {summary}")
-#                             return summary
-#                     except:
-#                         continue
-
-#             except wikipedia.exceptions.PageError:
-#                 print(f"❌ Wikipedia PageError for {result}, trying next result...")
-#                 continue
-
-#         return None  # No valid summary found
-
-#     except Exception as e:
-#         print(f"❌ Wikipedia API Error: {e}")
-#         return None
-
-
-#updated
 
 def async_wikipedia_search(query):
     """Fetch Wikipedia summary with proper error handling and debugging."""
@@ -593,22 +388,25 @@ async def retrieve_relevant_text(query: str, model, top_k=3):
     
 
 
-def extract_text_from_pdf(file_path):
-    """Extracts text from a PDF file."""
+import fitz  # PyMuPDF
+
+def extract_text_from_pdf(file_obj):
+    """Attempts text extraction from PDF using PyMuPDF, with pdfminer fallback."""
     try:
-        with open(file_path, "rb") as file:
-            reader = PyPDF2.PdfReader(file)
-            text = "\n".join(page.extract_text() or "" for page in reader.pages).strip()
-
-        if not text:
-            logging.info("Fallback to pdfminer as PyPDF2 couldn't extract text.")
-            text = extract_text_from_pdf_using_pdfminer(file_path)
-
-        return text or "No readable text found in the PDF."
-
+        with fitz.open(stream=file_obj.file.read(), filetype="pdf") as doc:
+            text = ""
+            for page in doc:
+                text += page.get_text()
+        if not text.strip():
+            raise ValueError("Empty text extracted with PyMuPDF.")
+        return text
     except Exception as e:
-        logging.error(f"PDF read error: {e}")
-        return "Error reading PDF file."
+        logging.warning(f"⚠️ PyMuPDF failed: {e}. Trying fallback with pdfminer.")
+        # Rewind file pointer and use pdfminer
+        file_obj.file.seek(0)
+        return extract_text_from_pdf_using_pdfminer(file_obj.file)
+
+
     
 
 from pdfminer.high_level import extract_text
@@ -638,56 +436,16 @@ import asyncio
 import uuid
 import logging
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-
-# async def store_text_in_chroma(text, source_name, model):
-#     """Stores extracted text into ChromaDB, preventing duplicates."""
-#     try:
-#         existing_docs = chroma_collection.get(include=["documents"]) or {}
-#         existing_texts = existing_docs.get("documents", []) or []
-
-#         if text in existing_texts:
-#             logging.info(f"🔄 Skipping duplicate entry from {source_name}")
-#             return
-        
-#         text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
-#         chunks = text_splitter.split_text(text)
-
-#         # ✅ Generate embeddings asynchronously
-#         embeddings = await asyncio.to_thread(lambda: [model.encode(chunk) for chunk in chunks])
-
-#         # Create unique IDs for each chunk
-#         ids = [str(uuid.uuid4()) for _ in chunks]
-
-#         # Add to ChromaDB
-#         chroma_collection.add(
-#             documents=chunks,
-#             embeddings=embeddings,
-#             ids=ids,
-#             metadatas=[{"source": source_name}] * len(chunks)
-#         )
-
-#         logging.info(f"✅ Stored {len(chunks)} chunks from {source_name} into ChromaDB.")
-
-#     except Exception as e:
-#         logging.error(f"❌ Error storing in ChromaDB: {e}")
-
-
-#updated
-
 import re
 
 async def store_text_in_chroma(text, source_name, model, user_id=None):
-    """Stores extracted text into ChromaDB, preventing duplicates per user."""
     try:
-        # Clean the source_name to make it ID-safe
         safe_source = re.sub(r'\W+', '_', source_name)
 
-        # Fetch all documents and metadata
         existing_docs = chroma_collection.get(include=["documents", "metadatas"]) or {}
         existing_texts = existing_docs.get("documents", []) or []
         existing_metadata = existing_docs.get("metadatas", []) or []
 
-        # Check for duplicates for the current user (if user_id is provided)
         if user_id:
             for i, doc in enumerate(existing_texts):
                 if doc == text and existing_metadata[i].get("user_id") == user_id:
@@ -698,17 +456,15 @@ async def store_text_in_chroma(text, source_name, model, user_id=None):
                 logging.info(f"🔄 Skipping duplicate entry from {source_name}")
                 return
 
-        # Split text and embed
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
         chunks = text_splitter.split_text(text)
-        embeddings = await asyncio.to_thread(lambda: [model.encode(chunk) for chunk in chunks])
 
-        # ✅ Use source_name + UUID to generate unique and traceable IDs
+        embeddings = await asyncio.to_thread(lambda: [model.encode(chunk).tolist() for chunk in chunks])
         ids = [f"{safe_source}_{uuid.uuid4()}" for _ in chunks]
-
         metadata = [{"source": source_name, "user_id": user_id} for _ in chunks]
 
-        await chroma_collection.add(
+        # Not awaited — ChromaDB add is usually synchronous
+        chroma_collection.add(
             documents=chunks,
             embeddings=embeddings,
             ids=ids,
@@ -719,6 +475,7 @@ async def store_text_in_chroma(text, source_name, model, user_id=None):
 
     except Exception as e:
         logging.error(f"❌ Error storing in ChromaDB: {e}")
+
 
 
 def print_all_chroma():
@@ -755,42 +512,32 @@ def print_all_chroma(chroma_collection):
     except Exception as e:
         logging.error(f"Error printing ChromaDB data: {e}")
 
-def process_uploaded_file(file, model, chroma_collection):
+async def process_uploaded_file(file, model, chroma_collection):
     """Processes uploaded files and stores embeddings in ChromaDB."""
     try:
+        logging.info(f"📁 Received file: {file.filename}")
+
+        # Step 1: Extract text
         if file.filename.endswith(".pdf"):
-            text = extract_text_from_pdf(file.file)
+            logging.info("📄 Detected PDF format.")
+            text = extract_text_from_pdf(file)
         elif file.filename.endswith(".docx"):
-            text = extract_text_from_docx(file.file)
+            logging.info("📄 Detected DOCX format.")
+            text = extract_text_from_docx(file)
         else:
             return "Unsupported file format. Please upload a PDF or DOCX file."
 
+        logging.info(f"📝 Extracted text length: {len(text) if text else 0}")
+
+        # Step 2: Store in Chroma
         if text:
-            asyncio.run(store_text_in_chroma(text, file.filename, model))  # ✅ Fix parameter order
+            await store_text_in_chroma(text, file.filename, model, chroma_collection)
             return "File processed and stored successfully."
         
         return "No valid text found in the uploaded file."
 
     except Exception as e:
-        logging.error(f"Error processing uploaded file: {e}")
+        logging.error(f"❌ Error processing uploaded file: {e}", exc_info=True)
         return "Error processing uploaded file."
 
-# from sentence_transformers import SentenceTransformer, util
 
-# model = SentenceTransformer("all-MiniLM-L6-v2")  # Use a compact transformer
-
-# def filter_results(query, results, threshold=0.5):
-#     query_embedding = model.encode(query, convert_to_tensor=True)
-#     filtered = []
-#     for result in results:
-#         result_embedding = model.encode(result["text"], convert_to_tensor=True)
-#         similarity = util.pytorch_cos_sim(query_embedding, result_embedding).item()
-#         if similarity > threshold:
-#             filtered.append(result)  # Keep only relevant responses
-#     return filtered
-
-# def retrieve_from_chroma(query):
-#     results = chroma_collection.query(query_texts=[query], n_results=5)
-#     # Apply filtering before returning
-#     filtered_results = filter_results(query, results['documents'])
-#     return filtered_results if filtered_results else ["No relevant results found."]

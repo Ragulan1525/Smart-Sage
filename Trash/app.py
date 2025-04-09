@@ -213,3 +213,126 @@
 
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+
+
+# @app.get("/query")
+# async def get_answer(query: str):
+#     """Handles user queries and retrieves relevant information."""
+#     logging.info(f"Received query: {query}")
+
+#     query = query.lower().strip()
+#     if query in COMMON_RESPONSES:
+#         return {"response": COMMON_RESPONSES[query]}
+
+#     if len(query) < 3:  
+#         return {"response": "Could you provide more details?"}
+
+#     # chroma_result = await retrieve_relevant_text(query, model)
+#     # wiki_result = await async_wikipedia_search(query)
+#     # google_result = await search_google(query)
+#     # web_scrape_result = await scrape_and_summarize(query)
+
+#     # response_parts = []
+#     # if chroma_result:
+#     #     response_parts.append(f"📚 **ChromaDB Result:**\n{chroma_result}")
+#     # if wiki_result:
+#     #     response_parts.append(f"🌍 **Wikipedia:**\n{wiki_result}")
+#     # if google_result:
+#     #     response_parts.append(f"🔎 **Google Results:**\n" + "\n".join(google_result))
+#     # if web_scrape_result:
+#     #     response_parts.append(f"📄 **Extracted Summary:**\n{web_scrape_result}")
+
+#     # if response_parts:
+#     #     return {"response": "\n\n".join(response_parts)}
+
+#     # return {"response": "❌ No relevant data found. Try asking a different educational question. 😊"}
+
+#     response_parts = []
+    
+#     try:
+#         chroma_result = await retrieve_relevant_text(query, model)
+#         if chroma_result:
+#             response_parts.append(f"📚 **ChromaDB Result:**\n{chroma_result}")
+#     except Exception as e:
+#         logging.error(f"❌ Error retrieving ChromaDB result: {e}", exc_info=True)
+
+
+
+#     try:
+#        wiki_result = await async_wikipedia_search(query)
+
+#        if wiki_result:
+#          print(f"📝 Storing Wikipedia Data: {wiki_result}")
+ 
+#         # Ensure context_parts is initialized properly
+#          if 'context_parts' not in locals():
+#             context_parts = []
+
+#          store_text_in_chroma(wiki_result, "Wikipedia", model)
+#          context_parts.append(wiki_result)
+#          response_parts.append(f"🌍 **Wikipedia:**\n{wiki_result}")
+#        else:
+#         print(f"⚠️ No relevant Wikipedia result found for '{query}'")
+#     except Exception as e:
+#        print(f"❌ Error retrieving Wikipedia data: {e}")
+
+
+#     # try:
+#     #    wiki_result = await async_wikipedia_search(query)
+    
+#     #    if wiki_result:
+#     #       print(f"📝 Storing Wikipedia Data: {wiki_result}")  # Debug print
+#     #       store_text_in_chroma(wiki_result, "Wikipedia", model)  
+
+#     #       if not isinstance(context_parts, list):  # Ensure list type
+#     #          context_parts = []  
+        
+#     #       context_parts.append(wiki_result)  # Append Wikipedia result
+#     #       response_parts.append(f"🌍 **Wikipedia:**\n{wiki_result}")
+#     #    else:
+#     #       print(f"⚠️ No relevant Wikipedia result found for '{query}'")
+#     # except Exception as e:
+#     #    print(f"❌ Error retrieving Wikipedia data: {e}")
+
+
+    
+#     try:
+#         google_result = await search_google(query,model)
+#         if google_result:
+#             logging.info(f"🔎 Google Results: {google_result}")
+#             response_parts.append(f"🔎 **Google Results:**\n" + "\n".join(google_result))
+#     except Exception as e:
+#         logging.error(f"Error in retrieving Google results: {e}")
+#         google_result = None
+    
+#     try:
+#         web_scrape_result = await scrape_and_summarize(query)
+#         if web_scrape_result:
+#             response_parts.append(f"📄 **Extracted Summary:**\n{web_scrape_result}")
+#     except Exception as e:
+#         logging.error(f"Error in scraping and summarizing: {e}")
+
+#     if response_parts:
+#         return {"response": "\n\n".join(response_parts)}
+
+#     if not response_parts:
+#        return {"response": "I couldn't find relevant information. Try rephrasing your query!"}
+
+
+#     # 🔹 Step 6: Generate Final Answer Using LLM
+#     try:
+#         combined_context = "\n\n".join(context_parts)
+#         final_prompt = f"Use the following context to answer the question:\n\n{combined_context}\n\nQuestion: {query}\nAnswer:"
+        
+#         final_answer = generate_llm_response.generate(final_prompt)
+
+#         response_parts.append(f"💡 **Final Answer:**\n{final_answer}")
+
+#     except Exception as e:
+#         logging.error(f"❌ Error generating final LLM response: {e}", exc_info=True)
+#         final_answer = "I couldn't generate a response."
+
+#     # 🔹 Step 7: Return the Response
+#     return {"response": "\n\n".join(response_parts)}
