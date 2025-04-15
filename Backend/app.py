@@ -24,8 +24,8 @@ from docx import Document
 from chromadb import PersistentClient
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from Backend.retrieval import (
-    retrieve_relevant_text, process_uploaded_file, scrape_educational_websites,
-    scrape_and_summarize, async_wikipedia_search, search_google, fetch_latest_news,store_text_in_chroma,search_duckduckgo
+    retrieve_relevant_text, process_uploaded_file, scrape_educational_websites,return_extracted_data_from_chroma,
+    scrape_and_summarize, async_wikipedia_search, search_google, fetch_latest_news,store_text_in_chroma,search_duckduckgo,is_valid_url
 )
 import sys
 import os
@@ -58,6 +58,9 @@ chroma_collection = get_chroma_collection()
 
 
 
+# ============================
+# 🔁 REFRESH CHROMADB ON START
+# ============================
 @app.on_event("startup")
 async def startup_event():
     asyncio.create_task(refresh_chroma())
@@ -67,24 +70,28 @@ async def refresh_chroma():
     try:
         logging.info("🔄 Refreshing ChromaDB with updated web data...")
 
-        # ✅ Retrieve all stored queries from ChromaDB
-        stored_queries = chroma_collection.get(include=["documents"]).get("documents", [])
+        # stored_queries = chroma_collection.get(include=["documents"]).get("documents", [])
+        stored_data = chroma_collection.get(include=["metadatas"])
+        stored_queries = [m["query"] for m in stored_data.get("metadatas", []) if "query" in m]
 
-        # ✅ Refresh each stored query asynchronously
         for query in stored_queries:
-            updated_google_data = await search_google(query,model)  # ✅ Correct way to call async function
-            if updated_google_data:
-                store_text_in_chroma("\n".join(updated_google_data), "Google Search (Refreshed)", model)
+            updated_data = await search_google(query, model)
+            if updated_data:
+                await store_text_in_chroma("\n".join(updated_data), "Google Search (Refreshed)", model)
 
-        logging.info("✅ ChromaDB refresh completed!")
+        logging.info("✅ ChromaDB refresh completed successfully!")
 
     except Exception as e:
         logging.error(f"❌ Error during ChromaDB refresh: {e}")
 
-# ✅ Schedule refresh every 24 hours using an async-friendly approach
+
+# ===============================
+# ⏰ SCHEDULE AUTOMATIC REFRESHES
+# ===============================
 scheduler = BackgroundScheduler()
 scheduler.add_job(lambda: asyncio.create_task(refresh_chroma()), "interval", hours=24)
 scheduler.start()
+
 
 # ✅ Run refresh once at startup
 asyncio.create_task(refresh_chroma())  # ✅ Proper way to call async function
@@ -100,8 +107,9 @@ async def async_wikipedia_search(query):
         search_results = wikipedia.search(query, results=3)
         for result in search_results:
             summary = wikipedia.summary(result, sentences=3)
-            if "linked list" in summary.lower():  # Ensure relevance
+            if any(term.lower() in summary.lower() for term in query.lower().split()):
                 return summary
+
     except Exception as e:
         logging.error(f"Error fetching Wikipedia data: {e}")
     return None
@@ -129,11 +137,12 @@ async def search_google(query, model):
         "key": GOOGLE_API_KEY,
         "cx": GOOGLE_SEARCH_ENGINE_ID,
         "num": 3,  # Number of results to fetch
+        "dateRestrict": "d1"
     }
 
     retries = 3  # Number of retry attempts
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=5.0) as client:
         for attempt in range(retries):
             try:
                 response = await client.get(url, params=params, timeout=10)
@@ -152,17 +161,21 @@ async def search_google(query, model):
                 logging.warning(f"⚠️ Network error: {e}, Retrying in {wait_time} seconds...")
                 await asyncio.sleep(wait_time)
 
+            # except httpx.HTTPStatusError as e:
+            #     if e.response.status_code == 429:
+            #        wait_time = random.uniform(5, 10)  # Randomized delay to avoid detection
+            #        logging.warning(f"⚠️ Google API Rate Limit. Retrying in {wait_time:.1f} seconds...")
+            #        await asyncio.sleep(wait_time)
+
             except httpx.HTTPStatusError as e:
-                if e.response.status_code == 429:
-                   wait_time = random.uniform(5, 10)  # Randomized delay to avoid detection
-                   logging.warning(f"⚠️ Google API Rate Limit. Retrying in {wait_time:.1f} seconds...")
-                   await asyncio.sleep(wait_time)
+               if e.response.status_code == 429:
+                  logging.warning("⚠️ Google API Rate Limit hit. Switching to DuckDuckGo.")
+                  return await search_duckduckgo(query, model)  # fallback immediately
+               else:
+                  logging.error(f"❌ Google API Error {e.response.status_code}: {e.response.text}")
+                  return []
 
-                else:
-                    logging.error(f"❌ Google API Error {e.response.status_code}: {e.response.text}")
-                    break
-
-            await asyncio.sleep(5)  # Wait before retrying
+            await asyncio.sleep(1)  # Wait before retrying
     try:
        result = await search_google(...)
     except RateLimitError:
@@ -173,10 +186,13 @@ async def search_google(query, model):
     return await search_duckduckgo(query, model)  # Fallback if Google fails
 
 
+# =======================================
+# 🔎 DUCKDUCKGO SEARCH AS FALLBACK SOURCE
+# =======================================
 async def search_duckduckgo(query, model):
-    """Fetch search results from DuckDuckGo API (No API key required)."""
+    """Fetch search results from DuckDuckGo API (no key required)."""
     try:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=5.0) as client:
             response = await client.get(
                 "https://api.duckduckgo.com/",
                 params={"q": query, "format": "json"},
@@ -185,53 +201,56 @@ async def search_duckduckgo(query, model):
             response.raise_for_status()
             data = response.json()
 
-        logging.debug(f"Raw DuckDuckGo response for query '{query}': {data}")
+        logging.debug(f"🔍 DuckDuckGo raw response for '{query}': {data}")
 
-        # Extract the main abstract text or fallback to related topics
         main_text = data.get("AbstractText", "").strip()
         related_topics = [t["Text"] for t in data.get("RelatedTopics", []) if "Text" in t]
-
-        # Combine results if available
         extracted_results = [main_text] if main_text else related_topics
 
         if extracted_results:
             text_data = "\n".join(extracted_results)
-            store_text_in_chroma(text_data, f"DuckDuckGo Data ({query})", model)
+            await store_text_in_chroma(text_data, f"DuckDuckGo Data ({query})", model)
             return extracted_results
 
-        logging.warning(f"⚠️ No relevant results found for '{query}'.")
+        logging.warning(f"⚠️ No relevant DuckDuckGo results found for '{query}'.")
         return ["No valid results found."]
 
     except httpx.RequestError as e:
-        logging.error(f"❌ HTTP Request error while fetching DuckDuckGo data: {e}")
+        logging.error(f"❌ HTTP error from DuckDuckGo for '{query}': {e}")
     except Exception as e:
-        logging.error(f"❌ Unexpected error in search_duckduckgo: {e}")
+        logging.error(f"❌ Unexpected error in DuckDuckGo search: {e}")
 
-    return ["No valid results found."]  # Explicit return on failure
+    return ["No valid results found."]
 
 
+
+# =============================================
+# 🔄 GOOGLE SEARCH + SCRAPE + FALLBACK HANDLER
+# =============================================
 async def process_search_results(data, query, model):
-    """Process search results from Google API and extract relevant information."""
+    """Process Google search results and fallback if needed."""
     extracted_results = []
-    
+
     for item in data.get("items", []):
         link = item.get("link")
-        if link and validators.url(link):  # Validate URL before using
+        if link and validators.url(link):
             page_text = await scrape_and_summarize(link)
-            extracted_results.append(f"{item['title']}: {page_text}" if page_text else f"{item['title']}: {link}")
+            extracted_results.append(
+                f"{item['title']}: {page_text}" if page_text else f"{item['title']}: {link}"
+            )
 
     if extracted_results:
-        store_text_in_chroma("\n".join(extracted_results), f"Google Data ({query})", model)
+        await store_text_in_chroma("\n".join(extracted_results), f"Google Data ({query})", model)
         return extracted_results
-    
-    logging.warning("⚠️ Google returned results, but none were usable. Falling back to DuckDuckGo.")
-    return await search_duckduckgo(query, model)  # Fallback if Google data isn't useful
+
+    logging.warning(f"⚠️ Google data for '{query}' unusable. Falling back to DuckDuckGo.")
+    return await search_duckduckgo(query, model)
 
 
 async def fetch_latest_news(query, date=None):
     """Fetch live news using NewsAPI."""
     try:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=5.0) as client:
             url = "https://newsapi.org/v2/everything"
             params = {
                 "q": query,
@@ -251,11 +270,13 @@ async def fetch_latest_news(query, date=None):
             data = response.json()
 
             return [f"{article['title']}: {article['url']}" for article in data.get("articles", [])] if data.get("articles") else None
+        if not data.get("articles"):
+            return ["No recent news found."]
+
 
     except Exception as e:
         logging.error(f"❌ News API Error: {e}")
         return None
-
 
 
 
@@ -328,7 +349,7 @@ async def answer_question(request: QueryRequest):
             scrape_educational_websites(query, model),
             async_scrape_web(query),    
             fetch_latest_news(query),
-            search_google(query)
+            search_google(query,model)
         ]
     
         
@@ -364,12 +385,12 @@ async def answer_question(request: QueryRequest):
 
         if wiki_result:
           #wiki_summary = wiki_result.strip()  # Ensure no extra spaces
-          store_text_in_chroma(wiki_result, "Wikipedia", model)
+          await store_text_in_chroma(wiki_result, "Wikipedia", model)
           context_parts.append(wiki_result)
 
         if web_scrape_summaries:
            combined_web_data = "\n".join(web_scrape_summaries)
-           store_text_in_chroma(combined_web_data, "Web Scraping", model)
+           await store_text_in_chroma(combined_web_data, "Web Scraping", model)
            context_parts.append(combined_web_data)
 
         
@@ -514,7 +535,7 @@ async def get_on_this_day_events(query):
 
         url = f"https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/{month}/{day}"
 
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=5.0) as client:
             response = await client.get(url, timeout=10)
             response.raise_for_status()
             data = response.json()
@@ -798,9 +819,106 @@ def remove_duplicate_ids(chroma_collection):
             seen_ids.add(doc_id)
 
 
-async def generate_llm_response(query: str, context: str = None) -> str:
-    llm_prompt = f"""
-    You are **Smart Sage**, an AI-powered educational assistant created by Ragulan S. 🎓  
+# async def generate_llm_response(query: str, context: str = None) -> str:
+#     llm_prompt = f"""
+#     You are **Smart Sage**, an AI-powered educational assistant created by Ragulan S. 🎓  
+# Your goal is to help students learn, understand, and explore various topics — from programming to AI, general knowledge, and more. You always aim to educate, even if the input isn't directly academic.
+
+# ---
+
+# 📚 **Instructions:**
+
+# If a user asks "Who are you?" or something similar, reply politely:
+#   > "I'm Smart Sage, your AI-powered study assistant created by Ragulan S to help you learn and grow! and more relatively "
+
+# 1. If **relevant educational context** is available, use it to craft your response.
+# 2. If the **query is non-educational**, creatively turn it into a **learning opportunity**.
+#    - E.g., If asked about a celebrity, explain their influence on society, media, or culture.
+#    - If it's a joke or fun fact, explain the underlying concept behind it (e.g., science of humor, psychology).
+# 3. If it's a **completely unrelated or inappropriate query** (e.g., gossip, dating, etc.), respond **politely**:
+#    > "Hey! I'm Smart Sage, your educational companion. I focus on learning and knowledge-building. Could you please ask something study-related? 😊"
+
+# 4. If the query is **programming-related**, respond with structured code, explanation, and comments.
+# 5. If it's about **AI/tech**, go deep with clear explanations and examples.
+# 6. If it's about **general knowledge**, make it concise yet insightful.
+# 7. Never say “I don’t know.” Do your best to give a meaningful answer.
+# 8. Use a **friendly, clear, and student-first tone** — like a smart study buddy!
+
+# ---
+
+#     Question: {query}
+#     Context: {context if context else 'No relevant data available'}
+    
+# 🎓 **Smart Sage's Reply:**
+# """
+
+#     try:
+#         response = await asyncio.to_thread(ollama.chat, model="mistral", messages=[
+#             {"role": "system", "content": "You are Smart Sage, a helpful educational AI assistant. Answer accurately using the context provided. If no context is available, use your own knowledge. If asked about recent topics, respond with up-to-date information."},
+#             {"role": "user", "content": llm_prompt}
+#         ])
+        
+#         if response and 'message' in response:
+#             return response['message'].get('content', "I couldn't generate an answer. Try again.")
+#         else:
+#             return "⚠️ No response received from LLM."
+        
+        
+
+#     except Exception as e:
+#         logging.error(f"❌ LLM API Error: {e}")
+#         return "⚠️ There was an error processing your request. Please try again."
+
+    
+
+
+import asyncio
+import logging
+# from your_module import (
+#     is_valid_url,
+#     extract_text_from_url,
+#     is_educational_query,
+#     search_wikipedia,
+#     search_duckduckgo,
+#     return_extracted_data_from_chroma
+#)
+import ollama
+
+async def generate_llm_response(query: str, chat_id: str = "", context: str = None) -> str:
+    logging.info(f"Received query: {query} | Chat ID: {chat_id}")
+
+    try:
+        final_context = None
+
+        # 1. If URL, extract content
+        if is_valid_url(query):
+            logging.info("🌐 URL detected, extracting content...")
+            extracted = await scrape_and_summarize(query)
+            if extracted:
+                final_context = extracted
+
+        # 2. Check if query is educational
+        elif scrape_educational_websites(query):
+            logging.info("📘 Educational query detected, searching Wikipedia + Chroma...")
+            wiki_data, chroma_data = await asyncio.gather(
+                async_wikipedia_search(query),
+                return_extracted_data_from_chroma(query)
+            )
+            final_context = chroma_data or wiki_data
+
+        # 3. If non-educational → try DuckDuckGo
+        else:
+            logging.info("🤔 Possibly non-educational, trying DuckDuckGo...")
+            ddg_result = await search_duckduckgo(query)
+            if ddg_result:
+                final_context = ddg_result
+            else:
+                logging.warning("⚠️ No relevant DuckDuckGo result. Attempting fallback to Chroma.")
+                final_context = await return_extracted_data_from_chroma(query)
+
+        # 4. Create LLM prompt with educational tone and fallback context
+        llm_prompt = f"""
+You are **Smart Sage**, an AI-powered educational assistant created by Ragulan S. 🎓  
 Your goal is to help students learn, understand, and explore various topics — from programming to AI, general knowledge, and more. You always aim to educate, even if the input isn't directly academic.
 
 ---
@@ -808,13 +926,13 @@ Your goal is to help students learn, understand, and explore various topics — 
 📚 **Instructions:**
 
 If a user asks "Who are you?" or something similar, reply politely:
-  > "I'm Smart Sage, your AI-powered study assistant created by Ragulan S to help you learn and grow! and more relatively "
+  > "I'm Smart Sage, your AI-powered study assistant created by Ragulan S to help you learn and grow!"
 
 1. If **relevant educational context** is available, use it to craft your response.
 2. If the **query is non-educational**, creatively turn it into a **learning opportunity**.
    - E.g., If asked about a celebrity, explain their influence on society, media, or culture.
    - If it's a joke or fun fact, explain the underlying concept behind it (e.g., science of humor, psychology).
-3. If it's a **completely unrelated or inappropriate query** (e.g., gossip, dating, etc.), respond **politely**:
+3. If it's a **completely unrelated or inappropriate query**, respond **politely**:
    > "Hey! I'm Smart Sage, your educational companion. I focus on learning and knowledge-building. Could you please ask something study-related? 😊"
 
 4. If the query is **programming-related**, respond with structured code, explanation, and comments.
@@ -825,20 +943,21 @@ If a user asks "Who are you?" or something similar, reply politely:
 
 ---
 
-    Question: {query}
-    Context: {context if context else 'No relevant data available'}
-    
+Question: {query}
+Context: {final_context if final_context else 'No relevant data available'}
+
 🎓 **Smart Sage's Reply:**
 """
 
-    try:
+        # 5. Ask Ollama LLM (Mistral or other model)
         response = await asyncio.to_thread(ollama.chat, model="mistral", messages=[
             {"role": "system", "content": "You are Smart Sage, a helpful educational AI assistant. Answer accurately using the context provided. If no context is available, use your own knowledge. If asked about recent topics, respond with up-to-date information."},
             {"role": "user", "content": llm_prompt}
         ])
-        
+
+        # 6. Handle LLM output
         if response and 'message' in response:
-            return response['message'].get('content', "I couldn't generate an answer. Try again.")
+            return response['message'].get('content', "⚠️ I couldn't generate an answer. Try again.")
         else:
             return "⚠️ No response received from LLM."
 
@@ -848,51 +967,49 @@ If a user asks "Who are you?" or something similar, reply politely:
 
 
 
+# def get_response(query):
+#     collected_data = []
 
+#     # Step 1: Retrieve from ChromaDB
+#     chroma_result = chroma_collection.query(query)
+#     if chroma_result and chroma_result['documents']:
+#         collected_data.append("📚 ChromaDB: " + chroma_result['documents'][0])
 
-def get_response(query):
-    collected_data = []
+#     # Step 2: Retrieve from Google Search
+#     google_result = search_google(query, model)
+#     if google_result:
+#         collected_data.append("🌍 Google Search: " + google_result)
 
-    # Step 1: Retrieve from ChromaDB
-    chroma_result = chroma_collection.query(query)
-    if chroma_result and chroma_result['documents']:
-        collected_data.append("📚 ChromaDB: " + chroma_result['documents'][0])
+#     # Step 3: Retrieve from Wikipedia API
+#     wiki_result = async_wikipedia_search(query)
+#     if wiki_result:
+#         collected_data.append("📖 Wikipedia: " + wiki_result)
 
-    # Step 2: Retrieve from Google Search
-    google_result = search_google(query, model)
-    if google_result:
-        collected_data.append("🌍 Google Search: " + google_result)
+#     # Step 4: Collect All Sources (Ensures Data is Used)
+#     final_prompt = f"""
+#     You are an **AI tutor** that provides the most **accurate, educational, and structured** answers.
 
-    # Step 3: Retrieve from Wikipedia API
-    wiki_result = async_wikipedia_search(query)
-    if wiki_result:
-        collected_data.append("📖 Wikipedia: " + wiki_result)
+#     **User Query:** "{query}"
 
-    # Step 4: Collect All Sources (Ensures Data is Used)
-    final_prompt = f"""
-    You are an **AI tutor** that provides the most **accurate, educational, and structured** answers.
+#     **Collected Data:**
+#     {chr(10).join(collected_data) if collected_data else "⚠️ No relevant data found from external sources."}
 
-    **User Query:** "{query}"
+#     🛠 **Your Task:**
+#     1️⃣ Analyze the given data and generate a clear, structured, and **educational** response.  
+#     2️⃣ If the collected data is **insufficient**, rely on your knowledge to provide an **accurate answer**.  
+#     3️⃣ Ensure responses are **detailed and informative** rather than short one-liners.  
+#     4️⃣ If the query is **non-educational**, convert it into a learning experience.
 
-    **Collected Data:**
-    {chr(10).join(collected_data) if collected_data else "⚠️ No relevant data found from external sources."}
+#         You are **Smart Sage**, an AI-powered educational assistant . 
+# Your goal is to help students learn, understand, and explore various topics — from programming to AI, general knowledge, and more. You always aim to educate, even if the input isn't directly academic.
 
-    🛠 **Your Task:**
-    1️⃣ Analyze the given data and generate a clear, structured, and **educational** response.  
-    2️⃣ If the collected data is **insufficient**, rely on your knowledge to provide an **accurate answer**.  
-    3️⃣ Ensure responses are **detailed and informative** rather than short one-liners.  
-    4️⃣ If the query is **non-educational**, convert it into a learning experience.
+#     **Final Answer:**  
+#     """
 
-        You are **Smart Sage**, an AI-powered educational assistant . 
-Your goal is to help students learn, understand, and explore various topics — from programming to AI, general knowledge, and more. You always aim to educate, even if the input isn't directly academic.
-
-    **Final Answer:**  
-    """
-
-    # Step 5: Force LLM to Generate an Answer
-    llm_response = generate_llm_response(final_prompt)
+#     # Step 5: Force LLM to Generate an Answer
+#     llm_response = generate_llm_response(final_prompt)
     
-    return llm_response
+#     return llm_response
 
 # ---
 
@@ -914,6 +1031,43 @@ Your goal is to help students learn, understand, and explore various topics — 
 # ---
 
 
+async def get_response(query):
+    # Step 1: Start all tasks in parallel
+    chroma_task = asyncio.to_thread(chroma_collection.query, query)
+    google_task = await search_google(query, model)
+    wiki_task = async_wikipedia_search(query)
+    news_task = fetch_latest_news(query)
+
+    # Step 2: Wait for all to complete
+    chroma_result, google_result, wiki_result, news_result = await asyncio.gather(
+        chroma_task, google_task, wiki_task, news_task
+    )
+
+    # Step 3: Collect responses
+    collected_data = []
+    if chroma_result and chroma_result['documents']:
+        collected_data.append("📚 ChromaDB: " + chroma_result['documents'][0])
+    if google_result:
+        collected_data.append("🌍 Google Search: " + "\n".join(google_result))
+    if wiki_result:
+        collected_data.append("📖 Wikipedia: " + wiki_result)
+    if news_result:
+        collected_data.append("📰 News: " + "\n".join(news_result))
+
+    # Step 4: Build prompt and call LLM properly
+    final_prompt = f"""
+    You are an AI tutor...
+
+    **User Query:** "{query}"
+
+    **Collected Data:**
+    {chr(10).join(collected_data) if collected_data else "⚠️ No relevant data found from external sources."}
+
+    ...
+    """
+
+    # ✅ Await this!
+    return await generate_llm_response(final_prompt)
 
 
 

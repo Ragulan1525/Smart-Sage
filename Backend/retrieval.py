@@ -185,38 +185,135 @@ async def fetch_latest_news(query):
         return None
 
 
-async def scrape_and_summarize(url):
-    """Scrapes a webpage and summarizes its content."""
+
+# import httpx
+# from bs4 import BeautifulSoup
+# import logging
+
+# async def scrape_and_summarize(url):
+#     """Scrapes a webpage and summarizes its content."""
+#     if not url:
+#         logging.error("❌ No URL found to scrape.")
+#         return "No URL provided to scrape."
+
+#     if not url.startswith("http://") and not url.startswith("https://"):
+#         logging.error(f"❌ Invalid URL: {url}")
+#         return "Invalid URL format."
+
+#     try:
+#         async with httpx.AsyncClient(timeout=5.0) as client:  # shorter timeout
+#             response = await client.get(url)
+#             response.raise_for_status()
+
+#         soup = BeautifulSoup(response.text, "html.parser")
+
+#         # Remove unnecessary tags
+#         for tag in soup(["script", "style", "noscript", "header", "footer", "nav", "aside"]):
+#             tag.extract()
+
+#         # Extract meaningful content
+#         content_elements = soup.find_all(["p", "div", "article", "section"])
+#         text = " ".join([elem.get_text(separator=" ", strip=True) for elem in content_elements]).strip()
+
+#         if len(text) < 100:
+#             return None  # too little content
+#         elif len(text) <= 500:
+#             return text  # already concise enough
+
+#         # Truncate and summarize
+#         text = text[:1024]
+#         try:
+#             summary = summarizer(text, max_length=150, min_length=50, do_sample=False)[0]['summary_text']
+#             return summary
+#         except Exception as e:
+#             logging.error(f"❌ Summarization error: {e}")
+#             return text[:300]  # fallback to raw excerpt
+
+#     except httpx.HTTPStatusError as e:
+#         logging.error(f"❌ HTTP error during scraping {url}: {e}")
+#     except httpx.RequestError as e:
+#         logging.error(f"❌ Request failed for {url}: {e}")
+#     except Exception as e:
+#         logging.error(f"❌ General scraping error for {url}: {e}")
+
+#     return None  # final fallback if everything fails
+
+        
+
+
+
+import httpx
+import logging
+from bs4 import BeautifulSoup
+from urllib.parse import urlparse
+from transformers import pipeline
+
+# Initialize only once (ensure you do this outside if you're importing it)
+summarizer = pipeline("summarization")
+
+def is_valid_url(url: str) -> bool:
+    """Validates whether a string is a proper URL."""
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, timeout=10)
+        parsed = urlparse(url)
+        return parsed.scheme in ("http", "https") and parsed.netloc != ""
+    except Exception:
+        return False
+
+async def scrape_and_summarize(url_or_query: str):
+    """Scrapes a webpage if input is a valid URL and summarizes it. Otherwise returns None."""
+    
+    if not url_or_query:
+        logging.error("❌ No input received for scraping.")
+        return None
+
+    # Not a valid URL — skip scraping
+    if not is_valid_url(url_or_query):
+        logging.info(f"⚠️ Input is not a URL. Skipping scraping: {url_or_query}")
+        return None
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(url_or_query)
             response.raise_for_status()
 
         soup = BeautifulSoup(response.text, "html.parser")
+
+        # Remove non-content elements
         for tag in soup(["script", "style", "noscript", "header", "footer", "nav", "aside"]):
             tag.extract()
 
+        # Extract text
         content_elements = soup.find_all(["p", "div", "article", "section"])
         text = " ".join([elem.get_text(separator=" ", strip=True) for elem in content_elements]).strip()
 
         if len(text) < 100:
-            return None  
+            logging.warning("⚠️ Scraped content too short.")
+            return None
         elif len(text) <= 500:
-            return text  
+            logging.info("ℹ️ Short content. Skipping summarization.")
+            return text
 
+        # Truncate for summarization
         text = text[:1024]
+
         try:
             summary = summarizer(text, max_length=150, min_length=50, do_sample=False)[0]['summary_text']
+            logging.info("✅ Summary successfully generated.")
             return summary
         except Exception as e:
             logging.error(f"❌ Summarization error: {e}")
-            return text[:300]
+            return text[:300]  # fallback
 
+    except httpx.HTTPStatusError as e:
+        logging.error(f"❌ HTTP error while scraping {url_or_query}: {e}")
+    except httpx.RequestError as e:
+        logging.error(f"❌ Request failed for {url_or_query}: {e}")
     except Exception as e:
-        logging.error(f"❌ Error scraping {url}: {e}")
-        return None
-        
-    
+        logging.error(f"❌ General scraping error: {e}")
+
+    return None
+
+
 # ✅ Helper Function to Extract First Full Sentences (Avoid Mid-Cutoff)
 def extract_first_sentences(text, max_length=500):
     """Extracts the first few full sentences without cutting off mid-way."""
@@ -438,6 +535,61 @@ import logging
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 import re
 
+# async def store_text_in_chroma(text, source_name, model, user_id=None):
+#     try:
+#         safe_source = re.sub(r'\W+', '_', source_name)
+
+#         existing_docs = chroma_collection.get(include=["documents", "metadatas"]) or {}
+#         existing_texts = existing_docs.get("documents", []) or []
+#         existing_metadata = existing_docs.get("metadatas", []) or []
+
+#         if user_id:
+#             for i, doc in enumerate(existing_texts):
+#                 if doc == text and existing_metadata[i].get("user_id") == user_id:
+#                     logging.info(f"🔄 Skipping duplicate for user {user_id} from {source_name}")
+#                     return
+#         else:
+#             if text in existing_texts:
+#                 logging.info(f"🔄 Skipping duplicate entry from {source_name}")
+#                 return
+
+#         text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
+#         chunks = text_splitter.split_text(text)
+
+#         embeddings = await asyncio.to_thread(lambda: [model.encode(chunk).tolist() for chunk in chunks])
+#         ids = [f"{safe_source}_{uuid.uuid4()}" for _ in chunks]
+#         metadata = [{"source": source_name, "user_id": user_id} for _ in chunks]
+
+#         # Not awaited — ChromaDB add is usually synchronous
+#         chroma_collection.add(
+#             documents=chunks,
+#             embeddings=embeddings,
+#             ids=ids,
+#             metadatas=metadata
+#         )
+
+#         # metadata = [
+#         #    {"source": source_name, "user_id": user_id, "chunk_index": i}
+#         #    for i in range(len(chunks))
+#         # ]
+
+        
+#         # await asyncio.to_thread(
+#         #    chroma_collection.add,
+#         #    documents=chunks,
+#         #    embeddings=embeddings,
+#         #    ids=ids,
+#         #    metadatas=metadata
+#         # )   
+
+
+#         logging.info(f"✅ Stored {len(chunks)} chunks from {source_name} into ChromaDB for user {user_id}.")
+
+#     except Exception as e:
+#         logging.error(f"❌ Error storing in ChromaDB: {e}")
+
+from datetime import datetime
+
 async def store_text_in_chroma(text, source_name, model, user_id=None):
     try:
         safe_source = re.sub(r'\W+', '_', source_name)
@@ -450,21 +602,33 @@ async def store_text_in_chroma(text, source_name, model, user_id=None):
             for i, doc in enumerate(existing_texts):
                 if doc == text and existing_metadata[i].get("user_id") == user_id:
                     logging.info(f"🔄 Skipping duplicate for user {user_id} from {source_name}")
-                    return
+                    return {"status": "skipped", "reason": "duplicate"}
         else:
             if text in existing_texts:
                 logging.info(f"🔄 Skipping duplicate entry from {source_name}")
-                return
+                return {"status": "skipped", "reason": "duplicate"}
 
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
         chunks = text_splitter.split_text(text)
 
         embeddings = await asyncio.to_thread(lambda: [model.encode(chunk).tolist() for chunk in chunks])
         ids = [f"{safe_source}_{uuid.uuid4()}" for _ in chunks]
-        metadata = [{"source": source_name, "user_id": user_id} for _ in chunks]
+        metadata = [
+          {
+             "source": source_name,
+             "user_id": user_id,
+             "chunk_index": i,
+             "timestamp": datetime.utcnow().isoformat(),
+             "source_type": source_name.split()[0],  # e.g., "Google", "DuckDuckGo"
+             "query": text[:100],  # Optional: for trace/debug
+        # "source_url": "https://example.com",  # if available from search
+        # "confidence": 0.9  # if using a scoring system
+          }
+          for i in range(len(chunks))
+        ]
 
-        # Not awaited — ChromaDB add is usually synchronous
-        chroma_collection.add(
+        await asyncio.to_thread(
+            chroma_collection.add,
             documents=chunks,
             embeddings=embeddings,
             ids=ids,
@@ -472,23 +636,26 @@ async def store_text_in_chroma(text, source_name, model, user_id=None):
         )
 
         logging.info(f"✅ Stored {len(chunks)} chunks from {source_name} into ChromaDB for user {user_id}.")
+        logging.debug(f"🧩 First chunk preview: {chunks[0][:100]}")
+
+        return {"status": "success", "chunks_added": len(chunks)}
 
     except Exception as e:
         logging.error(f"❌ Error storing in ChromaDB: {e}")
+        return {"status": "error", "message": str(e)}
 
 
-
-def print_all_chroma():
-    """Prints all documents stored in ChromaDB."""
-    try:
-        all_data = chroma_collection.get(include=["documents"])
-        if all_data["documents"]:
-            for doc in all_data["documents"]:
-                print(f"Stored Document: {doc[:200]}...")  # Print first 200 chars
-        else:
-            print("⚠️ ChromaDB is empty!")
-    except Exception as e:
-        logging.error(f"Error retrieving ChromaDB data: {e}")
+# def print_all_chroma():
+#     """Prints all documents stored in ChromaDB."""
+#     try:
+#         all_data = chroma_collection.get(include=["documents"])
+#         if all_data["documents"]:
+#             for doc in all_data["documents"]:
+#                 print(f"Stored Document: {doc[:200]}...")  # Print first 200 chars
+#         else:
+#             print("⚠️ ChromaDB is empty!")
+#     except Exception as e:
+#         logging.error(f"Error retrieving ChromaDB data: {e}")
 
 
 
@@ -540,4 +707,32 @@ async def process_uploaded_file(file, model, chroma_collection):
         logging.error(f"❌ Error processing uploaded file: {e}", exc_info=True)
         return "Error processing uploaded file."
 
+async def return_extracted_data_from_chroma(query: str, model, chroma_collection, top_k=4):
+    """Returns relevant documents from ChromaDB based on similarity search."""
+    try:
+        query_embedding = await asyncio.to_thread(lambda: model.encode(query).tolist())
+        results = await asyncio.to_thread(
+            chroma_collection.query,
+            query_embeddings=[query_embedding],
+            n_results=top_k,
+            include=["documents", "metadatas"]
+        )
+
+        documents = results.get("documents", [[]])[0]
+        metadatas = results.get("metadatas", [[]])[0]
+
+        extracted_data = [
+            {
+                "chunk": doc,
+                "metadata": meta
+            }
+            for doc, meta in zip(documents, metadatas)
+        ]
+
+        logging.info(f"🔍 Retrieved {len(extracted_data)} chunks for query: {query}")
+        return extracted_data
+
+    except Exception as e:
+        logging.error(f"❌ Error retrieving from ChromaDB: {e}")
+        return []
 

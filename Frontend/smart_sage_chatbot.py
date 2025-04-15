@@ -1,6 +1,9 @@
+
+
 # import streamlit as st
 # import requests
 # import json
+# import time
 
 # # FastAPI Backend URL
 # API_URL = "http://127.0.0.1:8000"
@@ -8,10 +11,16 @@
 # # Page Configurations
 # st.set_page_config(page_title="Smart Sage - AI Study Assistant", layout="wide")
 
-# # Custom CSS for Responsive UI
+# # Custom CSS for Responsive UI and Animations
 # st.markdown(
 #     """
 #     <style>
+#     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap');
+    
+#     html, body, [class*="css"] {
+#         font-family: 'Inter', sans-serif;
+#     }
+
 #     .main {
 #         background-color: #f4f4f4;
 #     }
@@ -24,6 +33,7 @@
 #         padding: 10px;
 #         border-radius: 10px;
 #         margin-bottom: 10px;
+#         transition: all 0.3s ease;
 #     }
 #     .user-message {
 #         background-color: #e0e0e0;
@@ -36,6 +46,26 @@
 #         color: white;
 #         padding: 10px;
 #     }
+#     .loading-dots span {
+#         animation: blink 1.2s infinite;
+#         animation-fill-mode: both;
+#         font-size: 1.5rem;
+#         padding: 0 2px;
+#     }
+#     .loading-dots span:nth-child(2) {
+#         animation-delay: 0.2s;
+#     }
+#     .loading-dots span:nth-child(3) {
+#         animation-delay: 0.4s;
+#     }
+#     @keyframes blink {
+#         0%, 80%, 100% {
+#             opacity: 0;
+#         }
+#         40% {
+#             opacity: 1;
+#         }
+#     }
 #     </style>
 #     """,
 #     unsafe_allow_html=True,
@@ -44,6 +74,8 @@
 # # Initialize chat history
 # if "chat_history" not in st.session_state:
 #     st.session_state.chat_history = []
+# if "bot_typing" not in st.session_state:
+#     st.session_state.bot_typing = False
 
 # # Sidebar for File Upload
 # st.sidebar.title("📂 Upload Study Material")
@@ -75,97 +107,119 @@
 # # User Input
 # user_query = st.text_input("Ask something:", placeholder="e.g., Explain Neural Networks", key="user_input")
 
+# # Get Answer Button
 # if st.button("🔍 Get Answer"):
 #     if user_query:
-#         # Append user message to chat history
+#         # Append user message
 #         st.session_state.chat_history.append({"role": "user", "message": user_query})
+#         st.session_state.bot_typing = True
+#         st.rerun()
 
-#         # Send query to FastAPI backend (prioritizing ChromaDB retrieval)
-#         response = requests.get(f"{API_URL}/query", params={"query": user_query})
+# # Simulated Bot Typing (after rerun)
+# if st.session_state.bot_typing:
+#     with st.container():
+#         st.markdown(
+#             '<div class="message-container bot-message"><span class="loading-dots">Thinking<span>.</span><span>.</span><span>.</span></span></div>',
+#             unsafe_allow_html=True,
+#         )
 
+#     # Delay to simulate loading
+#     with st.spinner("Smart Sage is generating a response..."):
+#         time.sleep(1.5)  # simulate API delay
+#         last_query = [m["message"] for m in st.session_state.chat_history if m["role"] == "user"][-1]
+#         response = requests.get(f"{API_URL}/query", params={"query": last_query})
 #         if response.status_code == 200:
 #             bot_reply = response.json().get("response", "No answer found.")
 #         else:
 #             bot_reply = f"❌ Error retrieving answer: {response.text}"
-
-#         # Store bot response in chat history
 #         st.session_state.chat_history.append({"role": "bot", "message": bot_reply})
-
-#         # Refresh page to display chat history
+#         st.session_state.bot_typing = False
 #         st.rerun()
-#     else:
-#         st.warning("⚠️ Please enter a question.")
 
 # # Clear Chat Button
-# if st.button("🗑️ Clear Chat"):
-#     st.session_state.chat_history = []
-#     st.rerun()
-
-# # Footer
-# st.sidebar.markdown("---")
-# st.sidebar.markdown("Developed by **Smart Sage Team**")
+# if st.button("🗑️ Clear Chat"):import streamlit as st
 
 
-# #streamlit run smart_sage_chatbot.py
+
+
+
 
 import streamlit as st
 import requests
 import json
 import time
 
-# FastAPI Backend URL
 API_URL = "http://127.0.0.1:8000"
 
-# Page Configurations
+# Page Settings
 st.set_page_config(page_title="Smart Sage - AI Study Assistant", layout="wide")
 
-# Custom CSS for Responsive UI and Animations
+# Custom Styling
 st.markdown(
     """
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap');
-    
+    @import url('https://fonts.googleapis.com/css2?family=Rubik:wght@500;700&display=swap');
+
     html, body, [class*="css"] {
-        font-family: 'Inter', sans-serif;
+        font-family: 'Rubik', sans-serif;
     }
 
     .main {
         background-color: #f4f4f4;
     }
+
     .stTextInput>div>div>input {
         border-radius: 10px;
         padding: 10px;
         border: 1px solid #ccc;
+        background-color: #1f2937;
+        color: white;
     }
+
     .message-container {
         padding: 10px;
         border-radius: 10px;
         margin-bottom: 10px;
         transition: all 0.3s ease;
     }
+
     .user-message {
         background-color: #e0e0e0;
         color: black;
         text-align: right;
         padding: 10px;
     }
+
     .bot-message {
-        background-color: #4CAF50;
+        background-color: #1f2937;
         color: white;
         padding: 10px;
     }
+
+    .smart-sage-title {
+        font-size: 3rem;
+        font-weight: 700;
+        background: linear-gradient(to right, #00c6ff, #0072ff);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        margin-bottom: 0.5rem;
+    }
+
     .loading-dots span {
         animation: blink 1.2s infinite;
         animation-fill-mode: both;
         font-size: 1.5rem;
         padding: 0 2px;
     }
+
     .loading-dots span:nth-child(2) {
         animation-delay: 0.2s;
     }
+
     .loading-dots span:nth-child(3) {
         animation-delay: 0.4s;
     }
+
     @keyframes blink {
         0%, 80%, 100% {
             opacity: 0;
@@ -179,13 +233,15 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Initialize chat history
+# Session State Initialization
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 if "bot_typing" not in st.session_state:
     st.session_state.bot_typing = False
+if "last_input" not in st.session_state:
+    st.session_state.last_input = ""
 
-# Sidebar for File Upload
+# Sidebar - File Upload
 st.sidebar.title("📂 Upload Study Material")
 uploaded_file = st.sidebar.file_uploader("Upload PDF, DOCX, or TXT", type=["pdf", "docx", "txt"])
 
@@ -199,11 +255,11 @@ if uploaded_file:
     else:
         st.sidebar.error(f"❌ Error processing file: {response.text}")
 
-# Chatbot UI
-st.title("📚 Smart Sage - AI Study Assistant")
+# Title Section with Gradient Text
+st.markdown('<h1 class="smart-sage-title">Smart Sage</h1>', unsafe_allow_html=True)
 st.write("**Chat with Smart Sage to get relevant educational answers.**")
 
-# Display chat history
+# Display Chat History
 for chat in st.session_state.chat_history:
     with st.container():
         st.markdown(
@@ -212,18 +268,16 @@ for chat in st.session_state.chat_history:
             unsafe_allow_html=True,
         )
 
-# User Input
+# Text Input (Triggers on Enter)
 user_query = st.text_input("Ask something:", placeholder="e.g., Explain Neural Networks", key="user_input")
 
-# Get Answer Button
-if st.button("🔍 Get Answer"):
-    if user_query:
-        # Append user message
-        st.session_state.chat_history.append({"role": "user", "message": user_query})
-        st.session_state.bot_typing = True
-        st.rerun()
+if user_query and user_query != st.session_state.last_input:
+    st.session_state.last_input = user_query
+    st.session_state.chat_history.append({"role": "user", "message": user_query})
+    st.session_state.bot_typing = True
+    st.rerun()
 
-# Simulated Bot Typing (after rerun)
+# Bot Typing and Response Handling
 if st.session_state.bot_typing:
     with st.container():
         st.markdown(
@@ -231,15 +285,15 @@ if st.session_state.bot_typing:
             unsafe_allow_html=True,
         )
 
-    # Delay to simulate loading
     with st.spinner("Smart Sage is generating a response..."):
-        time.sleep(1.5)  # simulate API delay
+        time.sleep(1.5)
         last_query = [m["message"] for m in st.session_state.chat_history if m["role"] == "user"][-1]
         response = requests.get(f"{API_URL}/query", params={"query": last_query})
         if response.status_code == 200:
             bot_reply = response.json().get("response", "No answer found.")
         else:
             bot_reply = f"❌ Error retrieving answer: {response.text}"
+
         st.session_state.chat_history.append({"role": "bot", "message": bot_reply})
         st.session_state.bot_typing = False
         st.rerun()
@@ -247,8 +301,6 @@ if st.session_state.bot_typing:
 # Clear Chat Button
 if st.button("🗑️ Clear Chat"):
     st.session_state.chat_history = []
+    st.session_state.last_input = ""
+    st.session_state.bot_typing = False
     st.rerun()
-
-# Footer
-st.sidebar.markdown("---")
-st.sidebar.markdown("Developed by **Smart Sage Team**")
