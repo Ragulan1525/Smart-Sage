@@ -1,4 +1,4 @@
-# AI Study Helper Chatb
+# AI Study Helper Chatbot
 
 **Smart Sage** is an advanced AI-powered study assistant designed to help users retrieve relevant educational information from multiple sources, including uploaded documents, Wikipedia, web scraping, and a knowledge database. By integrating **Retrieval-Augmented Generation (RAG)**, it ensures responses remain strictly academic, making learning smarter and more efficient.  
 
