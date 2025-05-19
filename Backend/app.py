@@ -756,6 +756,150 @@ Your mission is to help students learn, understand, and explore various topics �
       return {"response": "I couldn't generate a response at the moment. Please try again later."}
 
     
+# from fastapi import FastAPI, Query
+# from typing import Optional
+# from uuid import uuid4
+# import logging
+# from datetime import datetime
+
+# app = FastAPI()
+
+# @app.get("/query")
+# async def get_answer(query: str, chat_id: Optional[str] = None):
+#     """Handles user queries and retrieves relevant information using LLM."""
+#     if not chat_id:
+#         chat_id = str(uuid4())
+
+#     logging.info(f"📩 New Query Received | Query: '{query}' | Chat ID: {chat_id}")
+
+#     # Save the user message
+#     save_message(chat_id, "user", query)
+
+#     query = query.lower().strip()
+#     if query in COMMON_RESPONSES:
+#         return {"response": COMMON_RESPONSES[query], "chat_id": chat_id}
+
+#     if len(query) < 3:
+#         return {"response": "Could you provide more details?", "chat_id": chat_id}
+
+#     # 🔹 Collect Context from Various Sources
+#     context_parts = []
+
+#     # 1. ChromaDB
+#     try:
+#         chroma_result = await retrieve_relevant_text(query, model)
+#         if chroma_result:
+#             context_parts.append(chroma_result)
+#     except Exception as e:
+#         logging.error(f"❌ ChromaDB Retrieval Error: {e}", exc_info=True)
+
+#     # 2. Wikipedia
+#     try:
+#         wiki_result = await async_wikipedia_search(query)
+#         if wiki_result:
+#             logging.info("📘 Wikipedia data added to context.")
+#             await store_text_in_chroma(wiki_result, "Wikipedia", model)
+#             context_parts.append(wiki_result)
+#         else:
+#             logging.info("⚠️ No Wikipedia results found.")
+#     except Exception as e:
+#         logging.error(f"❌ Wikipedia Retrieval Error: {e}", exc_info=True)
+
+#     # 3. Google Search
+#     try:
+#         google_result = await search_google(query, model)
+#         if google_result:
+#             context_parts.extend(google_result)
+#     except Exception as e:
+#         logging.error(f"❌ Google Search Error: {e}", exc_info=True)
+
+#     # 4. Web Scraping & Summarizing
+#     try:
+#         scrape_result = await scrape_and_summarize(query)
+#         if scrape_result:
+#             context_parts.append(scrape_result)
+#     except Exception as e:
+#         logging.error(f"❌ Web Scrape Error: {e}", exc_info=True)
+
+#     # 5. Historical News if Past Date Mentioned
+#     try:
+#         extracted_date = extract_date_from_query(query)
+#         if extracted_date and extracted_date.date() < datetime.now().date():
+#             news_results = await fetch_latest_news("education", date=extracted_date)
+#             if news_results:
+#                 context_parts.append("🗞️ News Highlights:\n" + "\n".join(news_results))
+#     except Exception as e:
+#         logging.error(f"❌ Historical News Fetch Error: {e}", exc_info=True)
+
+#     # 6. Live News Headlines
+#     try:
+#         if any(kw in query for kw in ["what happened", "news", "happened on", "latest events", "headlines"]) and not is_future_date(query):
+#             news_result = await fetch_latest_news(query)
+#             if news_result:
+#                 context_parts.append("📰 Live News Headlines:\n" + "\n".join(news_result))
+#         elif is_future_date(query):
+#             context_parts.append("🕒 The date you mentioned is in the future. I can't fetch future news, but I can help with historical insights or predictions!")
+#     except Exception as e:
+#         logging.error(f"❌ Live News API Error: {e}", exc_info=True)
+
+#     # 7. Wikipedia "On This Day"
+#     try:
+#         if "what happened on" in query or "on this day" in query:
+#             history_result = await get_on_this_day_events(query)
+#             if history_result:
+#                 context_parts.append(history_result)
+#     except Exception as e:
+#         logging.error(f"❌ On This Day Fetch Error: {e}", exc_info=True)
+
+#     # 🔸 Final Combined Context
+#     combined_context = "\n\n".join(context_parts) if context_parts else "No external context available."
+
+#     # 🔹 Prompt for LLM
+#     final_prompt = f"""
+# You are **Smart Sage**, a Retrieval-Augmented Generation (RAG) AI-powered educational assistant.
+
+# ---
+
+# 📚 **Guidelines**:
+# 1. Use educational context if available.
+# 2. Convert non-educational queries into learning moments.
+# 3. Be polite and redirect if the query is inappropriate.
+# 4. Give structured answers for code, AI, or tech topics.
+# 5. Use friendly and informative tone always.
+
+# ---
+
+# 📚 **Context**:
+# {combined_context}
+
+# 🧠 **Question**:
+# {query}
+
+# 🎯 **Task**:
+# Provide a helpful, friendly, educational response like a smart study buddy.
+#     """
+
+#     # 🔹 Generate LLM Response
+#     try:
+#         chat_history = get_chat_history(chat_id)
+#         chat_history.append({"role": "user", "content": final_prompt})
+
+#         llm_response = await chat(model="mistral", messages=[
+#             {"role": "system", "content": "You are Smart Sage, a helpful educational AI assistant. Respond with insightful answers using the provided context."},
+#             {"role": "user", "content": final_prompt}
+#         ])
+
+#         final_answer = llm_response.get("message", {}).get("content", "").strip() if llm_response else "I couldn't find an answer. Can you rephrase your question?"
+
+#         # Save assistant reply
+#         save_message(chat_id, "assistant", final_answer)
+
+#         return {"response": final_answer, "chat_id": chat_id}
+
+#     except Exception as e:
+#         logging.error(f"❌ LLM Generation Error: {e}", exc_info=True)
+#         return {"response": "I couldn't generate a response at the moment. Please try again later.", "chat_id": chat_id}
+
 
 
 
@@ -874,14 +1018,6 @@ def remove_duplicate_ids(chroma_collection):
 
 import asyncio
 import logging
-# from your_module import (
-#     is_valid_url,
-#     extract_text_from_url,
-#     is_educational_query,
-#     search_wikipedia,
-#     search_duckduckgo,
-#     return_extracted_data_from_chroma
-#)
 import ollama
 
 async def generate_llm_response(query: str, chat_id: str = "", context: str = None) -> str:
@@ -1068,6 +1204,31 @@ async def get_response(query):
 
     # ✅ Await this!
     return await generate_llm_response(final_prompt)
+
+
+# from mongodb_utils import get_full_memory, save_message, save_instruction
+
+# # Fetch previous history + instructions
+# memory_context = get_full_memory(chat_id)
+
+# # Build the model input
+# model_input = ""
+# for m in memory_context:
+#     if m['role'] == "instruction":
+#         model_input += f"Instruction: {m['content']}\n"
+#     else:
+#         model_input += f"{m['role'].capitalize()}: {m['content']}\n"
+
+# model_input += f"User: {current_user_query}\n"
+# model_input += "Assistant:"  # To guide the next response
+
+# # Send model_input to your RAG / LLM engine
+# response = generate_llm_response(model_input)
+
+# # Save the latest user message and bot response
+# save_message(chat_id, "user", current_user_query)
+# save_message(chat_id, "assistant", response)
+
 
 
 

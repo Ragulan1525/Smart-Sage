@@ -9,6 +9,11 @@ beautifulsoup4
 requests
 PyPDF2
 python-docx
+python-dotenv
+httpx
+apscheduler
+dateparser
+posthog
 
 
 # Streamlit (UI framework)
